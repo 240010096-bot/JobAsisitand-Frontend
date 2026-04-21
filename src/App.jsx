@@ -1,6 +1,6 @@
 import React from 'react'
 import RegistroAsistencia from './components/RegistroAsistencia'
-import './App.css'
+
 
 function App() {
   return (
