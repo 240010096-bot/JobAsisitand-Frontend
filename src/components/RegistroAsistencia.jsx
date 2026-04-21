@@ -98,7 +98,7 @@ const confirmarAsistencia = async () => {
       // 5. INTENTO DE SINCRONIZACIÓN AL BACKEND (Solo si hay internet)
       if (navigator.onLine) {
         try {
-          await fetch('https://jobasisitand-backend.onrender.com/asistencias, {
+          await fetch('https://jobasisitand-backend.onrender.com/api/asistencias, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(registros)
