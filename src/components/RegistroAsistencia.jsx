@@ -558,7 +558,7 @@ function Jobassistand() {
               );
             })()}
 
-
+            {vista === 'resumen' && (
               <div style={{ padding: '20px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '20px' }}>
                   <i className="bi bi-check-circle" style={{ fontSize: '50px', color: '#10b981' }} />
