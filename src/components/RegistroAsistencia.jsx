@@ -46,6 +46,7 @@ function Jobassistand() {
   const [loading,       setLoading]       = useState(false);
   const [lugarResumen,  setLugarResumen]  = useState('');
   const [coordsResumen, setCoordsResumen] = useState(null);
+  const [modalPersonal, setModalPersonal] = useState(false);
 
   const [formData, setFormData] = useState({
     nombre: '', apellido: '', email: '', pass: '', confirm: ''
@@ -295,10 +296,11 @@ function Jobassistand() {
                   {obtenerFechaActual()}
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-                  <div style={statCardStyle}>
+                  <div style={{ ...statCardStyle, cursor: 'pointer' }} onClick={() => setModalPersonal(true)}>
                     <i className="bi bi-people" style={{ fontSize: '28px', color: '#3b82f6' }} />
                     <h3 style={{ color: '#fff', margin: '10px 0 0 0' }}>{trabajadores.length}</h3>
                     <p style={{ color: '#9ca3af', fontSize: '12px' }}>Total Personal</p>
+                    <p style={{ color: '#3b82f6', fontSize: '10px', margin: '4px 0 0 0' }}>Ver lista</p>
                   </div>
                   <div style={statCardStyle}>
                     <i className="bi bi-geo-alt" style={{ fontSize: '28px', color: '#10b981' }} />
@@ -366,7 +368,10 @@ function Jobassistand() {
                 ) : (
                   trabajadores.map(t => (
                     <div key={t.id} style={itemStyle}>
-                      <span style={{ color: '#fff' }}>{t.nombre} {t.apellido}</span>
+                      <div>
+                        <span style={{ color: '#fff', display: 'block' }}>{t.nombre} {t.apellido}</span>
+                        <span style={{ color: '#6b7280', fontSize: '12px' }}>{t.area}</span>
+                      </div>
                       <input type="checkbox" checked={!!seleccionados[t.id]}
                         onChange={() => setSeleccionados({ ...seleccionados, [t.id]: !seleccionados[t.id] })}
                         style={{ width: '22px', height: '22px', accentColor: '#10b981' }} />
@@ -412,10 +417,13 @@ function Jobassistand() {
                     <p style={{ color: '#9ca3af', fontSize: '12px', marginTop: '20px', marginBottom: '8px' }}>AUSENTES</p>
                     {faltantes.map(f => (
                       <div key={f.id} style={{ ...itemStyle, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.05)' }}>
-                        <span style={{ color: '#ef4444' }}>
-                          <i className="bi bi-x-circle" style={{ marginRight: 6 }} />
-                          {f.nombre} {f.apellido}
-                        </span>
+                        <div>
+                          <span style={{ color: '#ef4444', display: 'block' }}>
+                            <i className="bi bi-x-circle" style={{ marginRight: 6 }} />
+                            {f.nombre} {f.apellido}
+                          </span>
+                          <span style={{ color: '#9ca3af', fontSize: '12px' }}>{f.area}</span>
+                        </div>
                       </div>
                     ))}
                   </>
@@ -445,6 +453,47 @@ function Jobassistand() {
           </div>
         </nav>
       )}
+
+      {/* ── MODAL LISTA DE PERSONAL ── */}
+      {modalPersonal && (
+        <div style={modalOverlayStyle} onClick={() => setModalPersonal(false)}>
+          <div style={modalBoxStyle} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ color: '#fff', margin: 0 }}>
+                <i className="bi bi-people" style={{ color: '#3b82f6', marginRight: '8px' }} />
+                Personal ({trabajadores.length})
+              </h3>
+              <button onClick={() => setModalPersonal(false)}
+                style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '20px', cursor: 'pointer' }}>
+                <i className="bi bi-x-lg" />
+              </button>
+            </div>
+
+            {trabajadores.length === 0 ? (
+              <p style={{ color: '#9ca3af', textAlign: 'center' }}>No hay colaboradores registrados.</p>
+            ) : (
+              <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                {trabajadores.map(t => (
+                  <div key={t.id} style={modalItemStyle}>
+                    <div style={modalAvatarStyle}>
+                      {t.nombre.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p style={{ color: '#fff', margin: 0, fontWeight: '500' }}>
+                        {t.nombre} {t.apellido}
+                      </p>
+                      <p style={{ color: '#3b82f6', fontSize: '12px', margin: '2px 0 0 0' }}>
+                        <i className="bi bi-briefcase" style={{ marginRight: '4px' }} />
+                        {t.area}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -463,5 +512,9 @@ const statCardStyle    = { backgroundColor: 'rgba(255,255,255,0.03)', padding: '
 const avatarStyle      = { width: '60px', height: '60px', backgroundColor: '#3b82f6', borderRadius: '50%', margin: '0 auto 10px auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', color: '#fff', fontWeight: 'bold' };
 const errorBannerStyle = { backgroundColor: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5', borderRadius: '10px', padding: '12px 15px', marginBottom: '15px', fontSize: '14px', display: 'flex', alignItems: 'center' };
 const locationCardStyle= { backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: '15px', padding: '16px 18px', margin: '0 0 10px 0' };
+const modalOverlayStyle= { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' };
+const modalBoxStyle    = { backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '24px 24px 0 0', padding: '25px', width: '100%', maxWidth: '500px' };
+const modalItemStyle   = { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 0', borderBottom: '1px solid #1f2937' };
+const modalAvatarStyle = { width: '38px', height: '38px', borderRadius: '50%', backgroundColor: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6', fontWeight: 'bold', flexShrink: 0 };
 
 export default Jobassistand;
