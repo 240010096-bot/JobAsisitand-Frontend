@@ -256,15 +256,22 @@ function Jobassistand() {
     });
 
   const abrirDia = async (anio, mes, dia) => {
-    const clave    = `${anio}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-    const inicio   = new Date(anio, mes, dia, 0, 0, 0).toISOString();
-    const fin      = new Date(anio, mes, dia, 23, 59, 59).toISOString();
-    const presentes = await db.asistencias
+    const inicio    = new Date(anio, mes, dia, 0, 0, 0).toISOString();
+    const fin       = new Date(anio, mes, dia, 23, 59, 59).toISOString();
+    const registros = await db.asistencias
       .where('fecha').between(inicio, fin, true, true).toArray();
-    const todosNombres  = (await db.trabajadores.toArray()).map(t => `${t.nombre} ${t.apellido}`);
-    const presentesNom  = presentes.map(r => r.trabajadorId);
-    const ausentesNom   = todosNombres.filter(n => !presentesNom.includes(n));
-    setAsistDia({ clave, presentes: presentesNom, ausentes: ausentesNom, lugar: presentes[0]?.lugar || null });
+    const todosActuales = (await db.trabajadores.toArray()).map(t => `${t.nombre} ${t.apellido}`);
+    const presentesNom  = registros.map(r => r.trabajadorId);
+    // Ausentes solo tiene sentido si hubo pase de lista ese día
+    const ausentesNom   = registros.length > 0
+      ? todosActuales.filter(n => !presentesNom.includes(n))
+      : [];
+    setAsistDia({
+      presentes:   presentesNom,
+      ausentes:    ausentesNom,
+      lugar:       registros[0]?.lugar || null,
+      sinRegistro: registros.length === 0
+    });
     setDiaSelec({ anio, mes, dia });
   };
 
@@ -426,21 +433,20 @@ function Jobassistand() {
 
             {vista === 'calendario' && (() => {
               const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-              const dias  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+              const dias  = ['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];
               const primerDia    = new Date(calAnio, calMes, 1).getDay();
               const totalDias    = new Date(calAnio, calMes + 1, 0).getDate();
               const celdas       = Array(primerDia).fill(null).concat(
                 Array.from({ length: totalDias }, (_, i) => i + 1)
               );
-              // Rellenar hasta múltiplo de 7
               while (celdas.length % 7 !== 0) celdas.push(null);
 
               return (
                 <div style={{ padding: '0 10px' }}>
                   <h2 style={{ color: '#fff', fontSize: '22px', margin: '0 0 16px 0' }}>Calendario</h2>
 
-                  {/* Navegación mes */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '12px 16px', border: '1px solid #1f2937' }}>
+                  {/* Navegación mes y año */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '10px 16px', border: '1px solid #1f2937' }}>
                     <button onClick={() => {
                       if (calMes === 0) { setCalMes(11); setCalAnio(calAnio - 1); }
                       else setCalMes(calMes - 1);
@@ -460,10 +466,23 @@ function Jobassistand() {
                     </button>
                   </div>
 
+                  {/* Navegación año rápida */}
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginBottom: '14px' }}>
+                    <button onClick={() => { setCalAnio(calAnio - 1); setDiaSelec(null); }}
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid #374151', color: '#9ca3af', borderRadius: '8px', padding: '4px 12px', cursor: 'pointer', fontSize: '12px' }}>
+                      ← {calAnio - 1}
+                    </button>
+                    <span style={{ color: '#6b7280', fontSize: '12px', alignSelf: 'center' }}>{calAnio}</span>
+                    <button onClick={() => { setCalAnio(calAnio + 1); setDiaSelec(null); }}
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid #374151', color: '#9ca3af', borderRadius: '8px', padding: '4px 12px', cursor: 'pointer', fontSize: '12px' }}>
+                      {calAnio + 1} →
+                    </button>
+                  </div>
+
                   {/* Cabecera días */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '6px' }}>
                     {dias.map(d => (
-                      <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: '11px', fontWeight: '600', padding: '4px 0', textTransform: 'uppercase' }}>{d}</div>
+                      <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: '11px', fontWeight: '600', padding: '4px 0' }}>{d}</div>
                     ))}
                   </div>
 
@@ -506,7 +525,7 @@ function Jobassistand() {
                         {String(diaSelec.dia).padStart(2,'0')}/{String(diaSelec.mes+1).padStart(2,'0')}/{diaSelec.anio}
                       </h4>
 
-                      {asistDia.presentes?.length === 0 && asistDia.ausentes?.length === 0 ? (
+                      {asistDia.sinRegistro ? (
                         <p style={{ color: '#6b7280', textAlign: 'center', fontSize: '13px' }}>Sin registros para este día.</p>
                       ) : (
                         <>
