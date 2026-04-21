@@ -30,7 +30,12 @@ const ErrorMsg = ({ msg }) =>
   ) : null;
 
 function Jobassistand() {
-  const [usuario,       setUsuario]       = useState(null);
+  const [usuario,       setUsuario]       = useState(() => {
+    try {
+      const guardado = localStorage.getItem('session_usuario');
+      return guardado ? JSON.parse(guardado) : null;
+    } catch { return null; }
+  });
   const [authMode,      setAuthMode]      = useState('login');
   const [vista,         setVista]         = useState('welcome');
   const [status,        setStatus]        = useState('Listo');
@@ -65,6 +70,7 @@ function Jobassistand() {
   }, [vista, usuario]);
 
   const cerrarSesion = () => {
+    localStorage.removeItem('session_usuario');
     setUsuario(null);
     setVista('welcome');
     setStatus('Sesión cerrada');
@@ -196,6 +202,7 @@ function Jobassistand() {
         .first();
 
       if (user && user.password === formData.pass) {
+        localStorage.setItem('session_usuario', JSON.stringify(user));
         setUsuario(user);
         setStatus('Conectado');
         limpiarError();
