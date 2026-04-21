@@ -48,6 +48,14 @@ function Jobassistand() {
   const [coordsResumen, setCoordsResumen] = useState(null);
   const [modalPersonal, setModalPersonal] = useState(false);
 
+  // ── Calendario ──
+  const hoy = new Date();
+  const [calMes,        setCalMes]        = useState(hoy.getMonth());
+  const [calAnio,       setCalAnio]       = useState(hoy.getFullYear());
+  const [diaSelec,      setDiaSelec]      = useState(null);   // { anio, mes, dia }
+  const [asistDia,      setAsistDia]      = useState([]);     // registros del día
+  const [diasConDatos,  setDiasConDatos]  = useState({});     // { 'YYYY-MM-DD': true }
+
   const [formData, setFormData] = useState({
     nombre: '', apellido: '', email: '', pass: '', confirm: ''
   });
@@ -69,6 +77,24 @@ function Jobassistand() {
       load();
     }
   }, [vista, usuario]);
+
+  // Cargar qué días del mes tienen registros
+  useEffect(() => {
+    if (!usuario || vista !== 'calendario') return;
+    const cargar = async () => {
+      const inicio = new Date(calAnio, calMes, 1).toISOString();
+      const fin    = new Date(calAnio, calMes + 1, 0, 23, 59, 59).toISOString();
+      const regs   = await db.asistencias
+        .where('fecha').between(inicio, fin, true, true).toArray();
+      const mapa = {};
+      regs.forEach(r => {
+        const clave = r.fecha.slice(0, 10);
+        mapa[clave] = true;
+      });
+      setDiasConDatos(mapa);
+    };
+    cargar();
+  }, [vista, calMes, calAnio, usuario]);
 
   const cerrarSesion = () => {
     localStorage.removeItem('session_usuario');
@@ -229,6 +255,19 @@ function Jobassistand() {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
 
+  const abrirDia = async (anio, mes, dia) => {
+    const clave    = `${anio}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    const inicio   = new Date(anio, mes, dia, 0, 0, 0).toISOString();
+    const fin      = new Date(anio, mes, dia, 23, 59, 59).toISOString();
+    const presentes = await db.asistencias
+      .where('fecha').between(inicio, fin, true, true).toArray();
+    const todosNombres  = (await db.trabajadores.toArray()).map(t => `${t.nombre} ${t.apellido}`);
+    const presentesNom  = presentes.map(r => r.trabajadorId);
+    const ausentesNom   = todosNombres.filter(n => !presentesNom.includes(n));
+    setAsistDia({ clave, presentes: presentesNom, ausentes: ausentesNom, lugar: presentes[0]?.lugar || null });
+    setDiaSelec({ anio, mes, dia });
+  };
+
   return (
     <div style={containerStyle}>
       {usuario && (
@@ -385,7 +424,141 @@ function Jobassistand() {
               </div>
             )}
 
-            {vista === 'resumen' && (
+            {vista === 'calendario' && (() => {
+              const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+              const dias  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+              const primerDia    = new Date(calAnio, calMes, 1).getDay();
+              const totalDias    = new Date(calAnio, calMes + 1, 0).getDate();
+              const celdas       = Array(primerDia).fill(null).concat(
+                Array.from({ length: totalDias }, (_, i) => i + 1)
+              );
+              // Rellenar hasta múltiplo de 7
+              while (celdas.length % 7 !== 0) celdas.push(null);
+
+              return (
+                <div style={{ padding: '0 10px' }}>
+                  <h2 style={{ color: '#fff', fontSize: '22px', margin: '0 0 16px 0' }}>Calendario</h2>
+
+                  {/* Navegación mes */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '12px 16px', border: '1px solid #1f2937' }}>
+                    <button onClick={() => {
+                      if (calMes === 0) { setCalMes(11); setCalAnio(calAnio - 1); }
+                      else setCalMes(calMes - 1);
+                      setDiaSelec(null);
+                    }} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '20px', cursor: 'pointer', padding: '4px 8px' }}>
+                      <i className="bi bi-chevron-left" />
+                    </button>
+                    <span style={{ color: '#fff', fontWeight: '600', fontSize: '16px' }}>
+                      {meses[calMes]} {calAnio}
+                    </span>
+                    <button onClick={() => {
+                      if (calMes === 11) { setCalMes(0); setCalAnio(calAnio + 1); }
+                      else setCalMes(calMes + 1);
+                      setDiaSelec(null);
+                    }} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '20px', cursor: 'pointer', padding: '4px 8px' }}>
+                      <i className="bi bi-chevron-right" />
+                    </button>
+                  </div>
+
+                  {/* Cabecera días */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '6px' }}>
+                    {dias.map(d => (
+                      <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: '11px', fontWeight: '600', padding: '4px 0', textTransform: 'uppercase' }}>{d}</div>
+                    ))}
+                  </div>
+
+                  {/* Celdas del mes */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                    {celdas.map((dia, i) => {
+                      if (!dia) return <div key={`v-${i}`} />;
+                      const clave    = `${calAnio}-${String(calMes + 1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+                      const tieneDatos = diasConDatos[clave];
+                      const esHoy    = dia === hoy.getDate() && calMes === hoy.getMonth() && calAnio === hoy.getFullYear();
+                      const selec    = diaSelec && diaSelec.dia === dia && diaSelec.mes === calMes && diaSelec.anio === calAnio;
+                      return (
+                        <div key={dia} onClick={() => abrirDia(calAnio, calMes, dia)}
+                          style={{
+                            textAlign: 'center', padding: '10px 0', borderRadius: '10px', cursor: 'pointer', position: 'relative',
+                            backgroundColor: selec ? '#3b82f6' : esHoy ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.02)',
+                            border: esHoy && !selec ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                            color: selec ? '#fff' : '#e5e7eb',
+                            fontWeight: esHoy || selec ? '700' : '400',
+                            fontSize: '14px'
+                          }}>
+                          {dia}
+                          {tieneDatos && (
+                            <div style={{
+                              width: '5px', height: '5px', borderRadius: '50%',
+                              backgroundColor: selec ? '#fff' : '#10b981',
+                              margin: '2px auto 0 auto'
+                            }} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Detalle del día seleccionado */}
+                  {diaSelec && (
+                    <div style={{ marginTop: '20px', backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid #1f2937', borderRadius: '20px', padding: '20px' }}>
+                      <h4 style={{ color: '#fff', margin: '0 0 14px 0', fontSize: '15px' }}>
+                        <i className="bi bi-calendar-event" style={{ color: '#3b82f6', marginRight: '8px' }} />
+                        {String(diaSelec.dia).padStart(2,'0')}/{String(diaSelec.mes+1).padStart(2,'0')}/{diaSelec.anio}
+                      </h4>
+
+                      {asistDia.presentes?.length === 0 && asistDia.ausentes?.length === 0 ? (
+                        <p style={{ color: '#6b7280', textAlign: 'center', fontSize: '13px' }}>Sin registros para este día.</p>
+                      ) : (
+                        <>
+                          {asistDia.lugar && (
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '10px', padding: '10px', marginBottom: '14px' }}>
+                              <i className="bi bi-geo-alt-fill" style={{ color: '#10b981', fontSize: '13px', marginTop: '2px', flexShrink: 0 }} />
+                              <span style={{ color: '#9ca3af', fontSize: '11px', lineHeight: '1.4' }}>{asistDia.lugar}</span>
+                            </div>
+                          )}
+
+                          {asistDia.presentes?.length > 0 && (
+                            <>
+                              <p style={{ color: '#10b981', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px 0' }}>
+                                <i className="bi bi-check-circle" style={{ marginRight: '5px' }} />
+                                Presentes ({asistDia.presentes.length})
+                              </p>
+                              {asistDia.presentes.map((nombre, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981', fontSize: '11px', fontWeight: 'bold', flexShrink: 0 }}>
+                                    {nombre.charAt(0).toUpperCase()}
+                                  </div>
+                                  <span style={{ color: '#d1d5db', fontSize: '13px' }}>{nombre}</span>
+                                </div>
+                              ))}
+                            </>
+                          )}
+
+                          {asistDia.ausentes?.length > 0 && (
+                            <>
+                              <p style={{ color: '#ef4444', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '14px 0 8px 0' }}>
+                                <i className="bi bi-x-circle" style={{ marginRight: '5px' }} />
+                                Ausentes ({asistDia.ausentes.length})
+                              </p>
+                              {asistDia.ausentes.map((nombre, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: '11px', fontWeight: 'bold', flexShrink: 0 }}>
+                                    {nombre.charAt(0).toUpperCase()}
+                                  </div>
+                                  <span style={{ color: '#9ca3af', fontSize: '13px' }}>{nombre}</span>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+
               <div style={{ padding: '20px' }}>
                 <div style={{ textAlign: 'center', marginBottom: '20px' }}>
                   <i className="bi bi-check-circle" style={{ fontSize: '50px', color: '#10b981' }} />
@@ -443,13 +616,16 @@ function Jobassistand() {
       {usuario && (
         <nav style={navStyle}>
           <div style={navItem} onClick={() => setVista('registro')}>
-            <i className="bi bi-clipboard-check" style={{ color: vista === 'registro' ? '#3b82f6' : '#fff' }} />
+            <i className="bi bi-clipboard-check" style={{ color: vista === 'registro' ? '#3b82f6' : '#9ca3af' }} />
           </div>
           <div style={navItem} onClick={() => setVista('welcome')}>
-            <i className="bi bi-house-door" style={{ color: vista === 'welcome' ? '#3b82f6' : '#fff' }} />
+            <i className="bi bi-house-door" style={{ color: vista === 'welcome' ? '#3b82f6' : '#9ca3af' }} />
+          </div>
+          <div style={navItem} onClick={() => { setVista('calendario'); setDiaSelec(null); }}>
+            <i className="bi bi-calendar3" style={{ color: vista === 'calendario' ? '#3b82f6' : '#9ca3af' }} />
           </div>
           <div style={navItem} onClick={() => setVista('configuracion')}>
-            <i className="bi bi-gear" style={{ color: vista === 'configuracion' ? '#3b82f6' : '#fff' }} />
+            <i className="bi bi-gear" style={{ color: vista === 'configuracion' ? '#3b82f6' : '#9ca3af' }} />
           </div>
         </nav>
       )}
