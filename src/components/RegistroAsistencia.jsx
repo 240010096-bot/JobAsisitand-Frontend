@@ -53,7 +53,7 @@ function Jobassistand() {
   const [calMes,        setCalMes]        = useState(hoy.getMonth());
   const [calAnio,       setCalAnio]       = useState(hoy.getFullYear());
   const [diaSelec,      setDiaSelec]      = useState(null);   // { anio, mes, dia }
-  const [asistDia,      setAsistDia]      = useState({ presentes: [], ausentes: [], lugar: null, lat: null, lng: null, sinRegistro: true, ubicacionPendiente: false });
+  const [asistDia,      setAsistDia]      = useState({ presentes: [], ausentes: [], sinRegistro: true });
   const [diasConDatos,  setDiasConDatos]  = useState({});     // { 'YYYY-MM-DD': true }
 
   const [formData, setFormData] = useState({
@@ -280,23 +280,29 @@ function Jobassistand() {
     const fin       = new Date(anio, mes, dia, 23, 59, 59).toISOString();
     const registros = await db.asistencias
       .where('fecha').between(inicio, fin, true, true).toArray();
-    const todosActuales = (await db.trabajadores.toArray()).map(t => `${t.nombre} ${t.apellido}`);
-    const presentesNom  = registros.map(r => r.trabajadorId);
-    // Ausentes: todos los trabajadores que no tienen registro ese día (independiente de si hubo pase completo)
-    const ausentesNom   = todosActuales.filter(n => !presentesNom.includes(n));
-    const primerReg = registros[0];
-    const lugarVal  = primerReg?.lugar || null;
-    const latVal    = primerReg?.lat   || null;
-    const lngVal    = primerReg?.lng   || null;
-    const ubicacionPendiente = lugarVal === 'Obteniendo ubicación...';
+    const todosTrabajadores = await db.trabajadores.toArray();
+    // Mapa nombre completo -> { area }
+    const mapaArea = {};
+    todosTrabajadores.forEach(t => { mapaArea[`${t.nombre} ${t.apellido}`] = t.area || ''; });
+    // Mapa nombre completo -> lugar del registro de ese día
+    const mapaLugar = {};
+    registros.forEach(r => {
+      const lugar = r.lugar && r.lugar !== 'Obteniendo ubicación...' ? r.lugar : null;
+      mapaLugar[r.trabajadorId] = lugar;
+    });
+    const presentesNom = registros.map(r => r.trabajadorId);
+    const presentesObj = presentesNom.map(nombre => ({
+      nombre,
+      area:  mapaArea[nombre] || '',
+      lugar: mapaLugar[nombre] || null,
+    }));
+    const ausentesObj  = todosTrabajadores
+      .filter(t => !presentesNom.includes(`${t.nombre} ${t.apellido}`))
+      .map(t => ({ nombre: `${t.nombre} ${t.apellido}`, area: t.area || '' }));
     setAsistDia({
-      presentes:          presentesNom,
-      ausentes:           ausentesNom,
-      lugar:              ubicacionPendiente ? null : lugarVal,
-      lat:                latVal,
-      lng:                lngVal,
-      sinRegistro:        registros.length === 0,
-      ubicacionPendiente,
+      presentes:   presentesObj,
+      ausentes:    ausentesObj,
+      sinRegistro: registros.length === 0,
     });
     setDiaSelec({ anio, mes, dia });
   };
@@ -555,39 +561,22 @@ function Jobassistand() {
                         <p style={{ color: '#6b7280', textAlign: 'center', fontSize: '13px' }}>Sin registros para este día.</p>
                       ) : (
                         <>
-                          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '10px', padding: '10px', marginBottom: '14px' }}>
-                            <i className="bi bi-geo-alt-fill" style={{ color: '#10b981', fontSize: '13px', marginTop: '2px', flexShrink: 0 }} />
-                            <div>
-                              {asistDia.ubicacionPendiente ? (
-                                <span style={{ color: '#6b7280', fontSize: '11px', fontStyle: 'italic' }}>
-                                  <i className="bi bi-hourglass-split" style={{ marginRight: '4px' }} />
-                                  Ubicación pendiente de sincronizar
-                                </span>
-                              ) : asistDia.lugar ? (
-                                <span style={{ color: '#9ca3af', fontSize: '11px', lineHeight: '1.4' }}>{asistDia.lugar}</span>
-                              ) : (
-                                <span style={{ color: '#6b7280', fontSize: '11px' }}>Sin ubicación registrada</span>
-                              )}
-                              {asistDia.lat && asistDia.lng && !asistDia.ubicacionPendiente && (
-                                <p style={{ color: '#4b5563', fontSize: '10px', margin: '4px 0 0 0' }}>
-                                  {asistDia.lat.toFixed(6)}, {asistDia.lng.toFixed(6)}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-
                           {asistDia.presentes?.length > 0 && (
                             <>
                               <p style={{ color: '#10b981', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px 0' }}>
                                 <i className="bi bi-check-circle" style={{ marginRight: '5px' }} />
                                 Presentes ({asistDia.presentes.length})
                               </p>
-                              {asistDia.presentes.map((nombre, i) => (
-                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981', fontSize: '11px', fontWeight: 'bold', flexShrink: 0 }}>
-                                    {nombre.charAt(0).toUpperCase()}
+                              {asistDia.presentes.map((t, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981', fontSize: '11px', fontWeight: 'bold', flexShrink: 0, marginTop: '2px' }}>
+                                    {t.nombre.charAt(0).toUpperCase()}
                                   </div>
-                                  <span style={{ color: '#d1d5db', fontSize: '13px' }}>{nombre}</span>
+                                  <div>
+                                    <span style={{ color: '#d1d5db', fontSize: '13px', display: 'block' }}>{t.nombre}</span>
+                                    {t.area && <span style={{ color: '#3b82f6', fontSize: '11px', display: 'block', marginTop: '1px' }}><i className="bi bi-briefcase" style={{ marginRight: '3px' }} />{t.area}</span>}
+                                    {t.lugar && <span style={{ color: '#6b7280', fontSize: '10px', display: 'block', marginTop: '2px', lineHeight: '1.3' }}><i className="bi bi-geo-alt" style={{ marginRight: '3px', color: '#10b981' }} />{t.lugar}</span>}
+                                  </div>
                                 </div>
                               ))}
                             </>
@@ -599,12 +588,15 @@ function Jobassistand() {
                                 <i className="bi bi-x-circle" style={{ marginRight: '5px' }} />
                                 Ausentes ({asistDia.ausentes.length})
                               </p>
-                              {asistDia.ausentes.map((nombre, i) => (
-                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: '11px', fontWeight: 'bold', flexShrink: 0 }}>
-                                    {nombre.charAt(0).toUpperCase()}
+                              {asistDia.ausentes.map((t, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: '11px', fontWeight: 'bold', flexShrink: 0, marginTop: '2px' }}>
+                                    {t.nombre.charAt(0).toUpperCase()}
                                   </div>
-                                  <span style={{ color: '#9ca3af', fontSize: '13px' }}>{nombre}</span>
+                                  <div>
+                                    <span style={{ color: '#9ca3af', fontSize: '13px', display: 'block' }}>{t.nombre}</span>
+                                    {t.area && <span style={{ color: '#374151', fontSize: '11px', display: 'block', marginTop: '1px' }}><i className="bi bi-briefcase" style={{ marginRight: '3px' }} />{t.area}</span>}
+                                  </div>
                                 </div>
                               ))}
                             </>
