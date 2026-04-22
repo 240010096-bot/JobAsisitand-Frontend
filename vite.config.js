@@ -25,6 +25,12 @@ export default defineConfig({
             src: '/icono-512.svg',
             sizes: '512x512',
             type: 'image/svg+xml'
+          },
+          {
+            src: '/favicon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
           }
         ]
       }
