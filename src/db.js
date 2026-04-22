@@ -5,7 +5,7 @@ export const db = new Dexie('AgroAsistenciaDB');
 
 
 
-db.version(15).stores({
+db.version(16).stores({
   asistencias: '++id, trabajadorId, fecha, lat, lng, lugar, sincronizado',
   trabajadores: '++id, nombre, apellido, area',
   supervisores: '++id, email, password, nombre, apellido' // Nueva tabla
