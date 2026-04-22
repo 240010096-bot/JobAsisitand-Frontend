@@ -78,9 +78,9 @@ function Jobassistand() {
     }
   }, [vista, usuario]);
 
-  // Cargar qué días del mes tienen registros
+  // Cargar qué días del mes tienen registros — se ejecuta al cambiar mes/año SIN importar la vista
   useEffect(() => {
-    if (!usuario || vista !== 'calendario') return;
+    if (!usuario) return;
     const cargar = async () => {
       const inicio = new Date(calAnio, calMes, 1).toISOString();
       const fin    = new Date(calAnio, calMes + 1, 0, 23, 59, 59).toISOString();
@@ -94,7 +94,7 @@ function Jobassistand() {
       setDiasConDatos(mapa);
     };
     cargar();
-  }, [vista, calMes, calAnio, usuario]);
+  }, [calMes, calAnio, usuario]);
 
   const cerrarSesion = () => {
     localStorage.removeItem('session_usuario');
@@ -183,6 +183,13 @@ function Jobassistand() {
       setCoordsResumen(lat && lng ? { lat, lng } : null);
       setFaltantes(trabajadores.filter(t => !seleccionados[t.id]));
       setSeleccionados({});
+      // Refrescar días con datos para que el calendario muestre el punto inmediatamente
+      const inicioHoy = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const finHoy    = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59).toISOString();
+      const regsHoy   = await db.asistencias.where('fecha').between(inicioHoy, finHoy, true, true).toArray();
+      const mapaHoy   = {};
+      regsHoy.forEach(r => { mapaHoy[r.fecha.slice(0, 10)] = true; });
+      setDiasConDatos(mapaHoy);
       setVista('resumen');
       setStatus('Guardado localmente');
     } catch (err) {
@@ -262,10 +269,8 @@ function Jobassistand() {
       .where('fecha').between(inicio, fin, true, true).toArray();
     const todosActuales = (await db.trabajadores.toArray()).map(t => `${t.nombre} ${t.apellido}`);
     const presentesNom  = registros.map(r => r.trabajadorId);
-    // Ausentes solo tiene sentido si hubo pase de lista ese día
-    const ausentesNom   = registros.length > 0
-      ? todosActuales.filter(n => !presentesNom.includes(n))
-      : [];
+    // Ausentes: todos los trabajadores que no tienen registro ese día (independiente de si hubo pase completo)
+    const ausentesNom   = todosActuales.filter(n => !presentesNom.includes(n));
     setAsistDia({
       presentes:   presentesNom,
       ausentes:    ausentesNom,
