@@ -112,92 +112,105 @@ function Jobassistand() {
     }
 
     setLoading(true);
-    setStatus('Procesando...');
+    setStatus('Guardando...');
     setErrorMsg('');
 
     try {
-      let lat = null;
-      let lng = null;
-      let nombreLugar = 'Ubicación desconocida (Sin GPS)';
+      const fecha = new Date().toISOString();
 
-      const gpsPromise = new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-          (err) => reject(err),
-          { timeout: 5000, enableHighAccuracy: true, maximumAge: 0 }
-        );
-      });
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('GPS timeout')), 5000)
-      );
-
-      try {
-        const coords = await Promise.race([gpsPromise, timeoutPromise]);
-        lat = coords.lat;
-        lng = coords.lng;
-
-        if (navigator.onLine) {
-          try {
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
-            );
-            if (response.ok) {
-              const data = await response.json();
-              nombreLugar = data.display_name;
-            }
-          } catch {
-            nombreLugar = `Coords: ${lat.toFixed(5)}, ${lng.toFixed(5)} (sin conexión para traducir)`;
-          }
-        } else {
-          nombreLugar = `Coords: ${lat.toFixed(5)}, ${lng.toFixed(5)} (sin internet)`;
-        }
-      } catch {
-        console.warn('GPS no disponible o tardó demasiado.');
-      }
-
+      // ── 1. GUARDAR INMEDIATAMENTE sin esperar GPS ──
       const registros = presentes.map(t => ({
         trabajadorId: `${t.nombre} ${t.apellido}`,
-        fecha:        new Date().toISOString(),
-        lat,
-        lng,
-        lugar:        nombreLugar,
+        fecha,
+        lat:          null,
+        lng:          null,
+        lugar:        'Obteniendo ubicación...',
         sincronizado: 0
       }));
 
-      await db.asistencias.bulkAdd(registros);
+      const ids = await db.asistencias.bulkAdd(registros, { allKeys: true });
 
-      if (navigator.onLine) {
-        try {
-          await fetch('https://jobasisitand-backend.onrender.com/api/asistencia', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(registros)
-          });
-        } catch {
-          console.warn('Servidor inalcanzable, se enviará después.');
-        }
-      }
-
-      setLugarResumen(nombreLugar);
-      setCoordsResumen(lat && lng ? { lat, lng } : null);
+      // Actualizar UI al instante
       setFaltantes(trabajadores.filter(t => !seleccionados[t.id]));
       setSeleccionados({});
-      // Refrescar días con datos para que el calendario muestre el punto inmediatamente
+      setLugarResumen('Obteniendo ubicación...');
+      setCoordsResumen(null);
+
+      // Refrescar calendario
       const inicioHoy = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
       const finHoy    = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59).toISOString();
       const regsHoy   = await db.asistencias.where('fecha').between(inicioHoy, finHoy, true, true).toArray();
       const mapaHoy   = {};
       regsHoy.forEach(r => { mapaHoy[r.fecha.slice(0, 10)] = true; });
       setDiasConDatos(mapaHoy);
+
       setVista('resumen');
-      setStatus('Guardado localmente');
+      setStatus('Guardado');
+      setLoading(false);
+
+      // ── 2. GPS + geocodificación EN SEGUNDO PLANO ──
+      const actualizarUbicacion = async () => {
+        try {
+          const coords = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+              err => reject(err),
+              { timeout: 8000, enableHighAccuracy: true, maximumAge: 30000 }
+            );
+          });
+
+          let nombreLugar = `Coords: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+
+          if (navigator.onLine) {
+            try {
+              const res = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lng}`
+              );
+              if (res.ok) {
+                const data = await res.json();
+                nombreLugar = data.display_name;
+              }
+            } catch { /* sin internet, usamos coords */ }
+          }
+
+          // Actualizar registros guardados con la ubicación real
+          await Promise.all(ids.map(id =>
+            db.asistencias.update(id, { lat: coords.lat, lng: coords.lng, lugar: nombreLugar })
+          ));
+
+          // Sincronizar con backend
+          if (navigator.onLine) {
+            const registrosActualizados = registros.map((r, i) => ({
+              ...r, id: ids[i], lat: coords.lat, lng: coords.lng, lugar: nombreLugar
+            }));
+            fetch('https://jobasisitand-backend.onrender.com/api/asistencia', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body:    JSON.stringify(registrosActualizados)
+            }).catch(() => console.warn('Servidor inalcanzable, se enviará después.'));
+          }
+
+          // Actualizar resumen si el usuario sigue en esa pantalla
+          setLugarResumen(nombreLugar);
+          setCoordsResumen({ lat: coords.lat, lng: coords.lng });
+          setStatus('Guardado ✓');
+
+        } catch {
+          setLugarResumen('Sin ubicación (GPS no disponible)');
+          setStatus('Guardado sin GPS');
+        }
+      };
+
+      actualizarUbicacion();
+
     } catch (err) {
       console.error('Error crítico:', err);
       setErrorMsg('Ocurrió un error al procesar la asistencia. Intenta de nuevo.');
       setStatus('Error');
-    } finally {
       setLoading(false);
+    } finally {
+      // loading ya se apaga arriba antes de ir a resumen
+      if (loading) setLoading(false);
     }
   };
 
@@ -271,11 +284,19 @@ function Jobassistand() {
     const presentesNom  = registros.map(r => r.trabajadorId);
     // Ausentes: todos los trabajadores que no tienen registro ese día (independiente de si hubo pase completo)
     const ausentesNom   = todosActuales.filter(n => !presentesNom.includes(n));
+    const primerReg = registros[0];
+    const lugarVal  = primerReg?.lugar || null;
+    const latVal    = primerReg?.lat   || null;
+    const lngVal    = primerReg?.lng   || null;
+    const ubicacionPendiente = lugarVal === 'Obteniendo ubicación...';
     setAsistDia({
-      presentes:   presentesNom,
-      ausentes:    ausentesNom,
-      lugar:       registros[0]?.lugar || null,
-      sinRegistro: registros.length === 0
+      presentes:          presentesNom,
+      ausentes:           ausentesNom,
+      lugar:              ubicacionPendiente ? null : lugarVal,
+      lat:                latVal,
+      lng:                lngVal,
+      sinRegistro:        registros.length === 0,
+      ubicacionPendiente,
     });
     setDiaSelec({ anio, mes, dia });
   };
@@ -534,12 +555,26 @@ function Jobassistand() {
                         <p style={{ color: '#6b7280', textAlign: 'center', fontSize: '13px' }}>Sin registros para este día.</p>
                       ) : (
                         <>
-                          {asistDia.lugar && (
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '10px', padding: '10px', marginBottom: '14px' }}>
-                              <i className="bi bi-geo-alt-fill" style={{ color: '#10b981', fontSize: '13px', marginTop: '2px', flexShrink: 0 }} />
-                              <span style={{ color: '#9ca3af', fontSize: '11px', lineHeight: '1.4' }}>{asistDia.lugar}</span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '10px', padding: '10px', marginBottom: '14px' }}>
+                            <i className="bi bi-geo-alt-fill" style={{ color: '#10b981', fontSize: '13px', marginTop: '2px', flexShrink: 0 }} />
+                            <div>
+                              {asistDia.ubicacionPendiente ? (
+                                <span style={{ color: '#6b7280', fontSize: '11px', fontStyle: 'italic' }}>
+                                  <i className="bi bi-hourglass-split" style={{ marginRight: '4px' }} />
+                                  Ubicación pendiente de sincronizar
+                                </span>
+                              ) : asistDia.lugar ? (
+                                <span style={{ color: '#9ca3af', fontSize: '11px', lineHeight: '1.4' }}>{asistDia.lugar}</span>
+                              ) : (
+                                <span style={{ color: '#6b7280', fontSize: '11px' }}>Sin ubicación registrada</span>
+                              )}
+                              {asistDia.lat && asistDia.lng && !asistDia.ubicacionPendiente && (
+                                <p style={{ color: '#4b5563', fontSize: '10px', margin: '4px 0 0 0' }}>
+                                  {asistDia.lat.toFixed(6)}, {asistDia.lng.toFixed(6)}
+                                </p>
+                              )}
                             </div>
-                          )}
+                          </div>
 
                           {asistDia.presentes?.length > 0 && (
                             <>
