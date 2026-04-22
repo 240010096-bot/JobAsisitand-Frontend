@@ -15,24 +15,19 @@ export default defineConfig({
         theme_color: '#0B0E14',
         background_color: '#0B0E14',
         display: 'standalone', // Hace que se vea como app nativa (sin barra de navegador)
-        icons: [
-          {
-            src: '/icono-192.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml'
-          },
-          {
-            src: '/icono-512.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml'
-          },
-          {
-            src: '/favicon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any maskable'
-          }
-        ]
+        // ... dentro de los iconos
+icons: [
+  {
+    src: '/icono-192.png', // Cambiado a .png
+    sizes: '192x192',
+    type: 'image/png'
+  },
+  {
+    src: '/icono-512.png', // Cambiado a .png
+    sizes: '512x512',
+    type: 'image/png'
+  }
+]
       }
     })
   ]
