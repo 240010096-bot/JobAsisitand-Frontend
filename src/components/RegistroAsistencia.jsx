@@ -53,7 +53,7 @@ function Jobassistand() {
   const [calMes,        setCalMes]        = useState(hoy.getMonth());
   const [calAnio,       setCalAnio]       = useState(hoy.getFullYear());
   const [diaSelec,      setDiaSelec]      = useState(null);   // { anio, mes, dia }
-  const [asistDia,      setAsistDia]      = useState([]);     // registros del día
+  const [asistDia,      setAsistDia]      = useState({ presentes: [], ausentes: [], lugar: null, lat: null, lng: null, sinRegistro: true, ubicacionPendiente: false });
   const [diasConDatos,  setDiasConDatos]  = useState({});     // { 'YYYY-MM-DD': true }
 
   const [formData, setFormData] = useState({
