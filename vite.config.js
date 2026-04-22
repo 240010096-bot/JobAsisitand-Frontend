@@ -17,12 +17,12 @@ export default defineConfig({
         display: 'standalone', // Hace que se vea como app nativa (sin barra de navegador)
         icons: [
           {
-            src: '/icono-192.png',
+            src: '/icono-192.svg',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '/icono-512.png',
+            src: '/icono-512.svg',
             sizes: '512x512',
             type: 'image/png'
           }
