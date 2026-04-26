@@ -2,19 +2,23 @@ import Dexie from 'dexie';
 
 export const db = new Dexie('AgroAsistenciaDB');
 
-// Subimos la versión para incluir 'areaId' y 'rol' en las tablas correspondientes
+// Versión 21 — nuevo esquema con roles, áreas y pagos
 db.version(21).stores({
-  // 'areaId' es clave para filtrar quién ve a qué trabajador
-  asistencias: '++id, trabajadorId, fecha, lat, lng, tipo, areaId, totalCalculado', 
-  
-  // Agregamos 'areaId' para vincular al trabajador con su pago
+  // areaId vincula al trabajador con su área y permite filtrado por encargado
+  asistencias: '++id, trabajadorId, fecha, lat, lng, tipo, areaId, totalCalculado',
+
+  // pagoPorHora para cálculo financiero; curp como identificación
   trabajadores: '++id, nombre, apellido, areaId, telefono, curp, pagoPorHora',
-  
-  // Agregamos 'rol' y 'areaId' para el control de acceso
-  supervisores: '++id, email, password, nombre, apellido, rol, areaId', 
-  
-  // Tabla nueva para gestionar los costos por zona
-  areas: '++id, nombre, pagoPorHora' 
+
+  // rol ('admin' | 'encargado') + areaId para control de acceso
+  supervisores: '++id, email, password, nombre, apellido, rol, areaId',
+
+  // Catálogo de áreas con tarifa por hora
+  areas: '++id, nombre, pagoPorHora',
+});
+
+db.open().catch(err => {
+  console.error('No se pudo abrir la base de datos:', err);
 });
 
 export default db;
