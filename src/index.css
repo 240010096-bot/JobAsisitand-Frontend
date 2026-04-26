@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../db';
+// IMPORTANTE: Esta línea es la que arregla el error 'db is not defined'
+import { db } from '../db'; 
 
 function Jobassistand() {
-  // 1. Estados iniciales
+  // 1. Estados
   const [usuario, setUsuario] = useState(() => {
     try {
       const guardado = localStorage.getItem('session_usuario');
@@ -15,25 +16,17 @@ function Jobassistand() {
   const [listaTrabajadores, setListaTrabajadores] = useState([]);
   const [mostrarModal, setMostrarModal] = useState(false);
 
-  // 2. Lógica de Roles y Cálculo (Lo que preguntaste)
+  // 2. Lógica de Roles
   const esAdmin = usuario?.rol === 'admin';
 
-  const obtenerMontoDiario = async (trabajadorId) => {
-    try {
-      const trabajador = await db.trabajadores.get(trabajadorId);
-      if (!trabajador) return 0;
-      const area = await db.areas.get(trabajador.areaId);
-      return 8 * (area?.pagoPorHora || 0); // 8 horas base
-    } catch { return 0; }
-  };
-
-  // 3. Filtrado (Seguridad: El encargado solo ve su área)
+  // 3. Filtrado de trabajadores
   const trabajadoresFiltrados = listaTrabajadores.filter(t => {
     const coincideNombre = `${t.nombre} ${t.apellido}`.toLowerCase().includes(busqueda.toLowerCase());
+    // El encargado solo ve su área, el admin ve todo
     return esAdmin ? coincideNombre : (coincideNombre && t.areaId === usuario?.areaId);
   });
 
-  // 4. Manejo de Selección
+  // 4. Manejo de selección masiva
   const handleSelectAll = (e) => {
     setSeleccionados(e.target.checked ? trabajadoresFiltrados.map(t => t.id) : []);
   };
@@ -44,24 +37,27 @@ function Jobassistand() {
     );
   };
 
-  // Carga de datos
+  // 5. Carga de datos desde la DB (Dexie)
   useEffect(() => {
-    const cargar = async () => {
-      const data = await db.trabajadores.toArray();
-      setListaTrabajadores(data);
+    const cargarDatos = async () => {
+      try {
+        const data = await db.trabajadores.toArray();
+        setListaTrabajadores(data);
+      } catch (err) {
+        console.error("Error al cargar trabajadores:", err);
+      }
     };
-    cargar();
+    cargarDatos();
   }, []);
 
-  // --- RENDERIZADO DE INTERFAZ ---
+  if (!usuario) return <div className="p-5 text-center text-white">Inicia sesión para continuar.</div>;
+
   return (
-    <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff', fontFamily: 'system-ui' }}>
+    <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff' }}>
       
-      {/* HEADER Y BOTÓN CONDICIONAL */}
+      {/* HEADER DINÁMICO */}
       <div className="d-flex justify-content-between align-items-center p-3 border-bottom border-secondary">
         <h2 className="h5 mb-0">Panel de {esAdmin ? 'Administrador' : 'Encargado'}</h2>
-        
-        {/* Solo el Admin ve el botón de Nuevo Colaborador */}
         {esAdmin && (
           <button className="btn btn-primary btn-sm" onClick={() => setMostrarModal(true)}>
             <i className="bi bi-person-plus-fill me-2"></i>
@@ -73,12 +69,12 @@ function Jobassistand() {
       {/* BUSCADOR */}
       <div className="p-3">
         <div className="input-group">
-          <span className="input-group-text bg-dark border-secondary text-white border-end-0">
+          <span className="input-group-text bg-dark border-secondary text-white">
             <i className="bi bi-search"></i>
           </span>
           <input 
             type="text" 
-            className="form-control bg-dark text-white border-secondary border-start-0 shadow-none"
+            className="form-control bg-dark text-white border-secondary shadow-none"
             placeholder="Buscar trabajador..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
@@ -86,7 +82,7 @@ function Jobassistand() {
         </div>
       </div>
 
-      {/* LISTA DE ASISTENCIA CON SELECCIÓN MASIVA */}
+      {/* TABLA */}
       <div className="table-responsive px-3">
         <table className="table table-dark table-hover align-middle">
           <thead>
@@ -101,6 +97,7 @@ function Jobassistand() {
               </th>
               <th>Nombre</th>
               <th>Área</th>
+              {esAdmin && <th>Pago Base (8h)</th>}
               <th className="text-end">Acciones</th>
             </tr>
           </thead>
@@ -116,7 +113,12 @@ function Jobassistand() {
                   />
                 </td>
                 <td>{t.nombre} {t.apellido}</td>
-                <td><span className="badge bg-secondary">{t.areaNombre || 'General'}</span></td>
+                <td><span className="badge bg-secondary">{t.areaNombre || 'Sin área'}</span></td>
+                {esAdmin && (
+                  <td className="text-success fw-bold">
+                    ${(t.pagoPorHora * 8) || 0}
+                  </td>
+                )}
                 <td className="text-end">
                   <i className="bi bi-geo-alt-fill text-info" style={{ cursor: 'pointer' }}></i>
                 </td>
