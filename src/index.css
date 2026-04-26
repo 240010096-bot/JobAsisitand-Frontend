@@ -1,0 +1,37 @@
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  background-color: #080C12;
+  color: #E8EDF5;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 2px; }
+
+/* ── Inputs globales ── */
+input, select, textarea {
+  font-family: inherit;
+  color-scheme: dark;
+}
+input:focus, select:focus { outline: none; }
+
+/* ── Checkbox accent ── */
+input[type="checkbox"] { accent-color: #3b82f6; }
+
+/* ── Animaciones ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.25s ease forwards; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
