@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-// IMPORTANTE: Esta línea es la que arregla el error 'db is not defined'
-import { db } from '../db'; 
+import { db } from './db'; // Asegúrate de que la ruta a db.js sea correcta
 
 function Jobassistand() {
   // 1. Estados
@@ -16,17 +15,20 @@ function Jobassistand() {
   const [listaTrabajadores, setListaTrabajadores] = useState([]);
   const [mostrarModal, setMostrarModal] = useState(false);
 
-  // 2. Lógica de Roles
+  // 2. Lógica de Roles (Seguridad)
   const esAdmin = usuario?.rol === 'admin';
 
-  // 3. Filtrado de trabajadores
+  // 3. Filtrado Dinámico
   const trabajadoresFiltrados = listaTrabajadores.filter(t => {
-    const coincideNombre = `${t.nombre} ${t.apellido}`.toLowerCase().includes(busqueda.toLowerCase());
-    // El encargado solo ve su área, el admin ve todo
-    return esAdmin ? coincideNombre : (coincideNombre && t.areaId === usuario?.areaId);
+    const nombreCompleto = `${t.nombre} ${t.apellido}`.toLowerCase();
+    const coincideBusqueda = nombreCompleto.includes(busqueda.toLowerCase());
+    
+    // El administrador ve a todos, el encargado solo su área asignada
+    if (esAdmin) return coincideBusqueda;
+    return coincideBusqueda && t.areaId === usuario?.areaId;
   });
 
-  // 4. Manejo de selección masiva
+  // 4. Manejo de Selección Masiva
   const handleSelectAll = (e) => {
     setSeleccionados(e.target.checked ? trabajadoresFiltrados.map(t => t.id) : []);
   };
@@ -37,7 +39,7 @@ function Jobassistand() {
     );
   };
 
-  // 5. Carga de datos desde la DB (Dexie)
+  // 5. Cargar datos de la base de datos local
   useEffect(() => {
     const cargarDatos = async () => {
       try {
@@ -53,11 +55,14 @@ function Jobassistand() {
   if (!usuario) return <div className="p-5 text-center text-white">Inicia sesión para continuar.</div>;
 
   return (
-    <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff' }}>
+    <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff', fontFamily: 'sans-serif' }}>
       
       {/* HEADER DINÁMICO */}
       <div className="d-flex justify-content-between align-items-center p-3 border-bottom border-secondary">
-        <h2 className="h5 mb-0">Panel de {esAdmin ? 'Administrador' : 'Encargado'}</h2>
+        <h2 className="h5 mb-0">
+          <i className={`bi ${esAdmin ? 'bi-shield-lock-fill text-primary' : 'bi-person-badge text-info'} me-2`}></i>
+          Panel de {esAdmin ? 'Administrador' : 'Encargado'}
+        </h2>
         {esAdmin && (
           <button className="btn btn-primary btn-sm" onClick={() => setMostrarModal(true)}>
             <i className="bi bi-person-plus-fill me-2"></i>
@@ -69,23 +74,23 @@ function Jobassistand() {
       {/* BUSCADOR */}
       <div className="p-3">
         <div className="input-group">
-          <span className="input-group-text bg-dark border-secondary text-white">
+          <span className="input-group-text bg-dark border-secondary text-white border-end-0">
             <i className="bi bi-search"></i>
           </span>
           <input 
             type="text" 
-            className="form-control bg-dark text-white border-secondary shadow-none"
-            placeholder="Buscar trabajador..."
+            className="form-control bg-dark text-white border-secondary border-start-0 shadow-none"
+            placeholder="Buscar por nombre..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
           />
         </div>
       </div>
 
-      {/* TABLA */}
+      {/* TABLA DE ASISTENCIA */}
       <div className="table-responsive px-3">
-        <table className="table table-dark table-hover align-middle">
-          <thead>
+        <table className="table table-dark table-hover align-middle border-secondary">
+          <thead className="text-secondary">
             <tr>
               <th style={{ width: '40px' }}>
                 <input 
@@ -97,13 +102,13 @@ function Jobassistand() {
               </th>
               <th>Nombre</th>
               <th>Área</th>
-              {esAdmin && <th>Pago Base (8h)</th>}
+              {esAdmin && <th>Pago (8h)</th>}
               <th className="text-end">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {trabajadoresFiltrados.map(t => (
-              <tr key={t.id}>
+              <tr key={t.id} style={{ borderBottom: '1px solid #1f2937' }}>
                 <td>
                   <input 
                     type="checkbox" 
@@ -112,8 +117,11 @@ function Jobassistand() {
                     onChange={() => toggleSeleccion(t.id)}
                   />
                 </td>
-                <td>{t.nombre} {t.apellido}</td>
-                <td><span className="badge bg-secondary">{t.areaNombre || 'Sin área'}</span></td>
+                <td>
+                  <div className="fw-bold">{t.nombre} {t.apellido}</div>
+                  <small className="text-secondary" style={{ fontSize: '11px' }}>{t.curp || 'IDENTIFICACIÓN PENDIENTE'}</small>
+                </td>
+                <td><span className="badge bg-secondary opacity-75">{t.areaNombre || 'General'}</span></td>
                 {esAdmin && (
                   <td className="text-success fw-bold">
                     ${(t.pagoPorHora * 8) || 0}
@@ -127,6 +135,16 @@ function Jobassistand() {
           </tbody>
         </table>
       </div>
+
+      {/* ACCIÓN MASIVA (Flotante) */}
+      {seleccionados.length > 0 && (
+        <div className="position-fixed bottom-0 start-50 translate-middle-x mb-4 p-3 bg-primary rounded-pill shadow-lg d-flex align-items-center" style={{ zIndex: 1000 }}>
+          <span className="me-3 fw-bold">{seleccionados.length} seleccionados</span>
+          <button className="btn btn-light btn-sm rounded-pill fw-bold" onClick={() => alert("Registrando asistencia...")}>
+            Pasar Lista
+          </button>
+        </div>
+      )}
     </div>
   );
 }
