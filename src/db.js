@@ -1,15 +1,10 @@
 import Dexie from 'dexie';
 
-// 1. Creamos la instancia
-export const db = new Dexie('AgroAsistenciaDB'); 
+export const db = new Dexie('AgroAsistenciaDB');
 
-
-
-db.version(16).stores({
-  asistencias: '++id, trabajadorId, fecha, lat, lng, lugar, sincronizado',
-  trabajadores: '++id, nombre, apellido, area',
-  supervisores: '++id, email, password, nombre, apellido' // Nueva tabla
-});
-db.open().catch(err => {
-  console.error("No se pudo abrir la base de datos:", err);
+db.version(21).stores({
+  asistencias: '++id, trabajadorId, fecha, lat, lng, tipo, areaId, totalCalculado', 
+  trabajadores: '++id, nombre, apellido, areaId, telefono, curp',
+  supervisores: '++id, email, password, nombre, apellido, rol, areaId', 
+  areas: '++id, nombre, pagoPorHora' 
 });
