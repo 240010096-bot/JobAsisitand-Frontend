@@ -1,87 +1,132 @@
-// Dentro de tu función Jobassistand()
-const [busqueda, setBusqueda] = useState('');
-const [seleccionados, setSeleccionados] = useState([]);
+import React, { useState, useEffect } from 'react';
+import { db } from '../db';
 
-// Verificación de Rol
-const esAdmin = usuario?.rol === 'admin';
+function Jobassistand() {
+  // 1. Estados iniciales
+  const [usuario, setUsuario] = useState(() => {
+    try {
+      const guardado = localStorage.getItem('session_usuario');
+      return guardado ? JSON.parse(guardado) : null;
+    } catch { return null; }
+  });
 
-// Filtrado de trabajadores por búsqueda y por área (si no es admin)
-const trabajadoresFiltrados = listaTrabajadores.filter(t => {
-  const coincideNombre = `${t.nombre} ${t.apellido}`.toLowerCase().includes(busqueda.toLowerCase());
-  return esAdmin ? coincideNombre : (coincideNombre && t.areaId === usuario.areaId);
-});
+  const [busqueda, setBusqueda] = useState('');
+  const [seleccionados, setSeleccionados] = useState([]);
+  const [listaTrabajadores, setListaTrabajadores] = useState([]);
+  const [mostrarModal, setMostrarModal] = useState(false);
 
-const handleSelectAll = (e) => {
-  setSeleccionados(e.target.checked ? trabajadoresFiltrados.map(t => t.id) : []);
-};
+  // 2. Lógica de Roles y Cálculo (Lo que preguntaste)
+  const esAdmin = usuario?.rol === 'admin';
 
-return (
-  <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff' }}>
-    {/* HEADER Y BOTÓN CONDICIONAL */}
-    <div className="d-flex justify-content-between align-items-center p-3 border-bottom border-secondary">
-      <h2 className="h5 mb-0">Panel de {esAdmin ? 'Administrador' : 'Encargado'}</h2>
+  const obtenerMontoDiario = async (trabajadorId) => {
+    try {
+      const trabajador = await db.trabajadores.get(trabajadorId);
+      if (!trabajador) return 0;
+      const area = await db.areas.get(trabajador.areaId);
+      return 8 * (area?.pagoPorHora || 0); // 8 horas base
+    } catch { return 0; }
+  };
+
+  // 3. Filtrado (Seguridad: El encargado solo ve su área)
+  const trabajadoresFiltrados = listaTrabajadores.filter(t => {
+    const coincideNombre = `${t.nombre} ${t.apellido}`.toLowerCase().includes(busqueda.toLowerCase());
+    return esAdmin ? coincideNombre : (coincideNombre && t.areaId === usuario?.areaId);
+  });
+
+  // 4. Manejo de Selección
+  const handleSelectAll = (e) => {
+    setSeleccionados(e.target.checked ? trabajadoresFiltrados.map(t => t.id) : []);
+  };
+
+  const toggleSeleccion = (id) => {
+    setSeleccionados(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  // Carga de datos
+  useEffect(() => {
+    const cargar = async () => {
+      const data = await db.trabajadores.toArray();
+      setListaTrabajadores(data);
+    };
+    cargar();
+  }, []);
+
+  // --- RENDERIZADO DE INTERFAZ ---
+  return (
+    <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff', fontFamily: 'system-ui' }}>
       
-      {/* ELIMINACIÓN DE UI: Solo el Admin ve el botón de Nuevo Colaborador */}
-      {esAdmin && (
-        <button className="btn btn-primary btn-sm" onClick={() => setMostrarModal(true)}>
-          <i className="bi bi-person-plus-fill me-2"></i>
-          Nuevo Colaborador
-        </button>
-      )}
-    </div>
-
-    {/* BUSCADOR CON BOOTSTRAP ICONS */}
-    <div className="p-3">
-      <div className="input-group">
-        <span className="input-group-text bg-dark border-secondary text-white">
-          <i className="bi bi-search"></i>
-        </span>
-        <input 
-          type="text" 
-          className="form-control bg-dark text-white border-secondary"
-          placeholder="Buscar trabajador..."
-          onChange={(e) => setBusqueda(e.target.value)}
-        />
+      {/* HEADER Y BOTÓN CONDICIONAL */}
+      <div className="d-flex justify-content-between align-items-center p-3 border-bottom border-secondary">
+        <h2 className="h5 mb-0">Panel de {esAdmin ? 'Administrador' : 'Encargado'}</h2>
+        
+        {/* Solo el Admin ve el botón de Nuevo Colaborador */}
+        {esAdmin && (
+          <button className="btn btn-primary btn-sm" onClick={() => setMostrarModal(true)}>
+            <i className="bi bi-person-plus-fill me-2"></i>
+            Nuevo Colaborador
+          </button>
+        )}
       </div>
-    </div>
 
-    {/* LISTA DE ASISTENCIA CON SELECCIÓN MASIVA */}
-    <div className="table-responsive px-3">
-      <table className="table table-dark table-hover align-middle">
-        <thead>
-          <tr>
-            <th>
-              <input 
-                type="checkbox" 
-                className="form-check-input" 
-                onChange={handleSelectAll}
-                checked={seleccionados.length === trabajadoresFiltrados.length && trabajadoresFiltrados.length > 0}
-              />
-            </th>
-            <th>Nombre</th>
-            <th>Área</th>
-            <th className="text-end">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {trabajadoresFiltrados.map(t => (
-            <tr key={t.id}>
-              <td>
+      {/* BUSCADOR */}
+      <div className="p-3">
+        <div className="input-group">
+          <span className="input-group-text bg-dark border-secondary text-white border-end-0">
+            <i className="bi bi-search"></i>
+          </span>
+          <input 
+            type="text" 
+            className="form-control bg-dark text-white border-secondary border-start-0 shadow-none"
+            placeholder="Buscar trabajador..."
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* LISTA DE ASISTENCIA CON SELECCIÓN MASIVA */}
+      <div className="table-responsive px-3">
+        <table className="table table-dark table-hover align-middle">
+          <thead>
+            <tr>
+              <th style={{ width: '40px' }}>
                 <input 
                   type="checkbox" 
-                  className="form-check-input"
-                  checked={seleccionados.includes(t.id)}
-                  onChange={() => /* lógica toggle individual */ {}}
+                  className="form-check-input" 
+                  onChange={handleSelectAll}
+                  checked={seleccionados.length === trabajadoresFiltrados.length && trabajadoresFiltrados.length > 0}
                 />
-              </td>
-              <td>{t.nombre} {t.apellido}</td>
-              <td><span className="badge bg-secondary">{t.areaNombre}</span></td>
-              <td className="text-end">
-                <i className="bi bi-geo-alt-fill text-info"></i>
-              </td>
+              </th>
+              <th>Nombre</th>
+              <th>Área</th>
+              <th className="text-end">Acciones</th>
             </tr>
+          </thead>
+          <tbody>
+            {trabajadoresFiltrados.map(t => (
+              <tr key={t.id}>
+                <td>
+                  <input 
+                    type="checkbox" 
+                    className="form-check-input"
+                    checked={seleccionados.includes(t.id)}
+                    onChange={() => toggleSeleccion(t.id)}
+                  />
+                </td>
+                <td>{t.nombre} {t.apellido}</td>
+                <td><span className="badge bg-secondary">{t.areaNombre || 'General'}</span></td>
+                <td className="text-end">
+                  <i className="bi bi-geo-alt-fill text-info" style={{ cursor: 'pointer' }}></i>
+                </td>
+              </tr>
+            ))}
           </tbody>
-      </table>
+        </table>
+      </div>
     </div>
-  </div>
-);
+  );
+}
+
+export default Jobassistand;
