@@ -166,7 +166,7 @@ function AdminPanel({ usuario, onLogout }) {
 
   // Formularios
   const [fEnc,  setFEnc]  = useState({ nombre:'', apellido:'', email:'', pass:'', areaId:'' });
-  const [fTrab, setFTrab] = useState({ nombre:'', apellido:'', telefono:'', curp:'', areaId:'' });
+  const [fTrab, setFTrab] = useState({ nombre:'', apellido:'', telefono:'', curp:'', areaId:'', pagoPorHora:'' });
   const [fArea, setFArea] = useState({ nombre:'' });
 
   // Calendario
@@ -177,6 +177,16 @@ function AdminPanel({ usuario, onLogout }) {
   const [asistDia,     setAsistDia]     = useState(null);
   const [diasConDatos, setDiasConDatos] = useState({});
   const [modalPersonal, setModalPersonal] = useState(false);
+
+  // Reporte semanal
+  const hoyR = new Date();
+  const lunesDeEsta = new Date(hoyR);
+  lunesDeEsta.setDate(hoyR.getDate() - ((hoyR.getDay()+6)%7));
+  const fmtISO = d => d.toISOString().slice(0,10);
+  const [repInicio, setRepInicio] = useState(fmtISO(lunesDeEsta));
+  const [repFin,    setRepFin]    = useState(fmtISO(hoyR));
+  const [repDatos,  setRepDatos]  = useState(null);
+  const [repLoading,setRepLoading]= useState(false);
 
   const limpiar = () => { setErrorMsg(''); setOkMsg(''); };
 
@@ -257,8 +267,9 @@ function AdminPanel({ usuario, onLogout }) {
       nombre: fTrab.nombre.trim(), apellido: fTrab.apellido.trim(),
       telefono: fTrab.telefono.trim(), curp: fTrab.curp.trim().toUpperCase(),
       areaId: Number(fTrab.areaId),
+      pagoPorHora: fTrab.pagoPorHora ? Number(fTrab.pagoPorHora) : 0,
     });
-    setFTrab({ nombre:'', apellido:'', telefono:'', curp:'', areaId:'' });
+    setFTrab({ nombre:'', apellido:'', telefono:'', curp:'', areaId:'', pagoPorHora:'' });
     setOkMsg('Trabajador registrado.');
     recargar();
   };
@@ -268,6 +279,107 @@ function AdminPanel({ usuario, onLogout }) {
   const eliminarArea        = async id => { await db.areas.delete(id); recargar(); };
 
   const areaNombre = id => areas.find(a => a.id === Number(id))?.nombre || '—';
+
+  // ── GENERAR REPORTE ────────────────────────────────────────────────────────
+  const generarReporte = async () => {
+    setRepLoading(true);
+    setRepDatos(null);
+    try {
+      const inicio = new Date(repInicio + 'T00:00:00').toISOString();
+      const fin    = new Date(repFin    + 'T23:59:59').toISOString();
+      const regs   = await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray();
+      const trabs  = await db.trabajadores.toArray();
+      const areasL = await db.areas.toArray();
+
+      // Calcular dias laborables en el rango (lunes a sabado)
+      const diasRango = [];
+      const cur = new Date(repInicio + 'T12:00:00');
+      const end = new Date(repFin    + 'T12:00:00');
+      while (cur <= end) {
+        if (cur.getDay() !== 0) diasRango.push(cur.toISOString().slice(0,10));
+        cur.setDate(cur.getDate() + 1);
+      }
+      const totalDiasLab = diasRango.length;
+
+      const filas = trabs.map(t => {
+        const nombre   = `${t.nombre} ${t.apellido}`;
+        const area     = areasL.find(a => a.id === Number(t.areaId));
+        const diasPresente = new Set(
+          regs.filter(r => r.trabajadorId === nombre).map(r => r.fecha.slice(0,10))
+        ).size;
+        const diasAusente  = Math.max(0, totalDiasLab - diasPresente);
+        const pagoPorDia   = t.pagoPorHora ? Number(t.pagoPorHora) * 8 : 0;
+        const totalPago    = diasPresente * pagoPorDia;
+        return {
+          nombre, area: area?.nombre || '—',
+          presentes: diasPresente, ausentes: diasAusente,
+          pagoPorDia, totalPago,
+        };
+      });
+
+      setRepDatos({ filas, totalDiasLab, inicio: repInicio, fin: repFin });
+    } finally {
+      setRepLoading(false);
+    }
+  };
+
+  const descargarPDF = () => {
+    if (!repDatos) return;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    // Encabezado
+    doc.setFillColor(11, 14, 20);
+    doc.rect(0, 0, 297, 297, 'F');
+
+    doc.setFontSize(20);
+    doc.setTextColor(59, 130, 246);
+    doc.text('JOBASSISTAND', 14, 18);
+    doc.setFontSize(11);
+    doc.setTextColor(200, 200, 200);
+    doc.text('Reporte Semanal de Asistencias y Pagos', 14, 25);
+    doc.setFontSize(9);
+    doc.setTextColor(107, 114, 128);
+    doc.text(`Periodo: ${repDatos.inicio}  al  ${repDatos.fin}   |   Dias laborables: ${repDatos.totalDiasLab}`, 14, 31);
+    doc.text(`Generado: ${new Date().toLocaleString('es-MX')}`, 14, 36);
+
+    // Tabla
+    const cols = ['Empleado', 'Area', 'Dias Presentes', 'Dias Ausentes', 'Pago/Dia (MXN)', 'Total (MXN)'];
+    const rows = repDatos.filas.map(f => [
+      f.nombre, f.area,
+      f.presentes, f.ausentes,
+      f.pagoPorDia > 0 ? `$${f.pagoPorDia.toFixed(2)}` : 'N/A',
+      f.pagoPorDia > 0 ? `$${f.totalPago.toFixed(2)}` : 'N/A',
+    ]);
+
+    // Totales
+    const totPresentes = repDatos.filas.reduce((a,f)=>a+f.presentes,0);
+    const totAusentes  = repDatos.filas.reduce((a,f)=>a+f.ausentes,0);
+    const totPago      = repDatos.filas.reduce((a,f)=>a+f.totalPago,0);
+    rows.push(['TOTAL', '', totPresentes, totAusentes, '', `$${totPago.toFixed(2)}`]);
+
+    doc.autoTable({
+      startY: 42,
+      head: [cols],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [30, 41, 59], textColor: [148, 163, 184], fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { fillColor: [15, 23, 42], textColor: [226, 232, 240], fontSize: 8 },
+      alternateRowStyles: { fillColor: [20, 30, 55] },
+      footStyles: { fillColor: [30, 64, 175], textColor: [255,255,255], fontStyle: 'bold' },
+      didParseCell: (data) => {
+        if (data.row.index === rows.length - 1) {
+          data.cell.styles.fillColor = [30, 64, 175];
+          data.cell.styles.textColor = [255, 255, 255];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    const fecha = repDatos.inicio.replace(/-/g,'');
+    doc.save(`reporte_asistencias_${fecha}.pdf`);
+  };
 
   // ── RENDER ADMIN ──────────────────────────────────────────────────────────
   return (
@@ -428,6 +540,8 @@ function AdminPanel({ usuario, onLogout }) {
                 <option value="">-- Asignar Area --</option>
                 {areas.map(a=><option key={a.id} value={a.id}>{a.nombre}</option>)}
               </select>
+              <input type="number" placeholder="Pago por hora en MXN (opcional)" style={s.input} value={fTrab.pagoPorHora}
+                onChange={e=>setFTrab({...fTrab,pagoPorHora:e.target.value})} onFocus={limpiar}/>
               <button onClick={agregarTrabajador} style={s.btnBlue}>Registrar Empleado</button>
             </div>
             <h3 style={{color:'#9ca3af',fontSize:12,margin:'16px 0 8px',textTransform:'uppercase',letterSpacing:1}}>
@@ -465,6 +579,115 @@ function AdminPanel({ usuario, onLogout }) {
           />
         )}
 
+        {/* ── REPORTE SEMANAL ── */}
+        {vista === 'reporte' && (
+          <div>
+            <h2 style={s.pageTitle}>Reporte Semanal</h2>
+
+            {/* Selector de fechas */}
+            <div style={s.card}>
+              <h3 style={s.cardTitle}>Rango de fechas</h3>
+              <div style={{display:'flex',gap:10,marginBottom:12,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:120}}>
+                  <label style={{color:'#9ca3af',fontSize:11,display:'block',marginBottom:4}}>Desde</label>
+                  <input type="date" style={{...s.input,marginBottom:0}} value={repInicio}
+                    onChange={e=>setRepInicio(e.target.value)}/>
+                </div>
+                <div style={{flex:1,minWidth:120}}>
+                  <label style={{color:'#9ca3af',fontSize:11,display:'block',marginBottom:4}}>Hasta</label>
+                  <input type="date" style={{...s.input,marginBottom:0}} value={repFin}
+                    onChange={e=>setRepFin(e.target.value)}/>
+                </div>
+              </div>
+              <button onClick={generarReporte} style={{...s.btnBlue, opacity: repLoading?0.6:1}} disabled={repLoading}>
+                <i className="bi bi-bar-chart-line" style={{marginRight:8}}/>
+                {repLoading ? 'Generando...' : 'Generar Reporte'}
+              </button>
+            </div>
+
+            {/* Resultados */}
+            {repDatos && (
+              <>
+                {/* Resumen cards */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:14}}>
+                  <div style={{...s.statCard,padding:12}}>
+                    <i className="bi bi-check-circle" style={{color:'#10b981',fontSize:20}}/>
+                    <div style={{color:'#fff',fontSize:18,fontWeight:700,margin:'4px 0 0'}}>
+                      {repDatos.filas.reduce((a,f)=>a+f.presentes,0)}
+                    </div>
+                    <div style={{color:'#6b7280',fontSize:10}}>Asistencias</div>
+                  </div>
+                  <div style={{...s.statCard,padding:12}}>
+                    <i className="bi bi-x-circle" style={{color:'#ef4444',fontSize:20}}/>
+                    <div style={{color:'#fff',fontSize:18,fontWeight:700,margin:'4px 0 0'}}>
+                      {repDatos.filas.reduce((a,f)=>a+f.ausentes,0)}
+                    </div>
+                    <div style={{color:'#6b7280',fontSize:10}}>Inasistencias</div>
+                  </div>
+                  <div style={{...s.statCard,padding:12}}>
+                    <i className="bi bi-cash" style={{color:'#f59e0b',fontSize:20}}/>
+                    <div style={{color:'#fff',fontSize:14,fontWeight:700,margin:'4px 0 0'}}>
+                      ${repDatos.filas.reduce((a,f)=>a+f.totalPago,0).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0})}
+                    </div>
+                    <div style={{color:'#6b7280',fontSize:10}}>Total MXN</div>
+                  </div>
+                </div>
+
+                {/* Tabla por empleado */}
+                <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                  <div style={{padding:'14px 16px',borderBottom:'1px solid #1f2937'}}>
+                    <h3 style={{color:'#fff',margin:0,fontSize:14}}>Detalle por empleado</h3>
+                    <p style={{color:'#6b7280',fontSize:11,margin:'2px 0 0'}}>
+                      {repDatos.totalDiasLab} dias laborables (lun-sab)
+                    </p>
+                  </div>
+                  <div style={{overflowX:'auto'}}>
+                    {repDatos.filas.length === 0 ? (
+                      <p style={{color:'#6b7280',textAlign:'center',padding:20}}>No hay empleados registrados.</p>
+                    ) : repDatos.filas.map((f,i) => (
+                      <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                        padding:'12px 16px',borderBottom:'1px solid #1f2937',
+                        backgroundColor: i%2===0?'transparent':'rgba(255,255,255,0.01)'}}>
+                        <div style={{flex:2,minWidth:100}}>
+                          <div style={{color:'#fff',fontSize:13,fontWeight:500}}>{f.nombre}</div>
+                          <div style={{color:'#3b82f6',fontSize:11}}>{f.area}</div>
+                        </div>
+                        <div style={{display:'flex',gap:16,alignItems:'center'}}>
+                          <div style={{textAlign:'center'}}>
+                            <div style={{color:'#10b981',fontWeight:700,fontSize:15}}>{f.presentes}</div>
+                            <div style={{color:'#6b7280',fontSize:9}}>presentes</div>
+                          </div>
+                          <div style={{textAlign:'center'}}>
+                            <div style={{color:'#ef4444',fontWeight:700,fontSize:15}}>{f.ausentes}</div>
+                            <div style={{color:'#6b7280',fontSize:9}}>ausentes</div>
+                          </div>
+                          <div style={{textAlign:'center',minWidth:60}}>
+                            <div style={{color:'#f59e0b',fontWeight:700,fontSize:13}}>
+                              {f.pagoPorDia>0 ? `$${f.totalPago.toLocaleString('es-MX',{minimumFractionDigits:0})}` : 'N/A'}
+                            </div>
+                            <div style={{color:'#6b7280',fontSize:9}}>total</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Botón PDF */}
+                <button onClick={descargarPDF}
+                  style={{...s.btnBlue,backgroundColor:'#dc2626',marginTop:14,display:'flex',justifyContent:'center',alignItems:'center',gap:8}}>
+                  <i className="bi bi-file-earmark-pdf"/>
+                  Descargar PDF
+                </button>
+
+                <p style={{color:'#4b5563',fontSize:11,textAlign:'center',marginTop:8}}>
+                  * El pago se calcula con el campo "Pago por hora" de cada empleado x 8 hrs/dia
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
       </main>
 
       {/* Nav inferior */}
@@ -475,9 +698,10 @@ function AdminPanel({ usuario, onLogout }) {
           { v:'encargados',   icon:'bi-person-badge' },
           { v:'trabajadores', icon:'bi-people' },
           { v:'calendario',   icon:'bi-calendar3' },
+          { v:'reporte',      icon:'bi-file-earmark-bar-graph' },
         ].map(n=>(
-          <div key={n.v} style={s.navItem} onClick={()=>{setVista(n.v);limpiar();}}>
-            <i className={`bi ${n.icon}`} style={{color: vista===n.v ? '#3b82f6' : '#6b7280', fontSize:22}}/>
+          <div key={n.v} style={s.navItem} onClick={()=>{setVista(n.v);limpiar();setRepDatos(null);}}>
+            <i className={`bi ${n.icon}`} style={{color: vista===n.v ? '#3b82f6' : '#6b7280', fontSize:20}}/>
           </div>
         ))}
       </nav>
