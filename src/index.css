@@ -1,111 +1,87 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+// Dentro de tu función Jobassistand()
+const [busqueda, setBusqueda] = useState('');
+const [seleccionados, setSeleccionados] = useState([]);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+// Verificación de Rol
+const esAdmin = usuario?.rol === 'admin';
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+// Filtrado de trabajadores por búsqueda y por área (si no es admin)
+const trabajadoresFiltrados = listaTrabajadores.filter(t => {
+  const coincideNombre = `${t.nombre} ${t.apellido}`.toLowerCase().includes(busqueda.toLowerCase());
+  return esAdmin ? coincideNombre : (coincideNombre && t.areaId === usuario.areaId);
+});
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
+const handleSelectAll = (e) => {
+  setSeleccionados(e.target.checked ? trabajadoresFiltrados.map(t => t.id) : []);
+};
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
+return (
+  <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff' }}>
+    {/* HEADER Y BOTÓN CONDICIONAL */}
+    <div className="d-flex justify-content-between align-items-center p-3 border-bottom border-secondary">
+      <h2 className="h5 mb-0">Panel de {esAdmin ? 'Administrador' : 'Encargado'}</h2>
+      
+      {/* ELIMINACIÓN DE UI: Solo el Admin ve el botón de Nuevo Colaborador */}
+      {esAdmin && (
+        <button className="btn btn-primary btn-sm" onClick={() => setMostrarModal(true)}>
+          <i className="bi bi-person-plus-fill me-2"></i>
+          Nuevo Colaborador
+        </button>
+      )}
+    </div>
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
+    {/* BUSCADOR CON BOOTSTRAP ICONS */}
+    <div className="p-3">
+      <div className="input-group">
+        <span className="input-group-text bg-dark border-secondary text-white">
+          <i className="bi bi-search"></i>
+        </span>
+        <input 
+          type="text" 
+          className="form-control bg-dark text-white border-secondary"
+          placeholder="Buscar trabajador..."
+          onChange={(e) => setBusqueda(e.target.value)}
+        />
+      </div>
+    </div>
 
-body {
-  margin: 0;
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
-}
+    {/* LISTA DE ASISTENCIA CON SELECCIÓN MASIVA */}
+    <div className="table-responsive px-3">
+      <table className="table table-dark table-hover align-middle">
+        <thead>
+          <tr>
+            <th>
+              <input 
+                type="checkbox" 
+                className="form-check-input" 
+                onChange={handleSelectAll}
+                checked={seleccionados.length === trabajadoresFiltrados.length && trabajadoresFiltrados.length > 0}
+              />
+            </th>
+            <th>Nombre</th>
+            <th>Área</th>
+            <th className="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trabajadoresFiltrados.map(t => (
+            <tr key={t.id}>
+              <td>
+                <input 
+                  type="checkbox" 
+                  className="form-check-input"
+                  checked={seleccionados.includes(t.id)}
+                  onChange={() => /* lógica toggle individual */ {}}
+                />
+              </td>
+              <td>{t.nombre} {t.apellido}</td>
+              <td><span className="badge bg-secondary">{t.areaNombre}</span></td>
+              <td className="text-end">
+                <i className="bi bi-geo-alt-fill text-info"></i>
+              </td>
+            </tr>
+          </tbody>
+      </table>
+    </div>
+  </div>
+);
