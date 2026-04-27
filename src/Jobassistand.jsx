@@ -80,7 +80,7 @@ export default function Jobassistand() {
       
       for (const registro of pendientes) {
         try {
-          const response = await fetch('TU_URL_DE_RENDER/api/asistencias', { // <--- CAMBIA ESTO
+          const response = await fetch('https://jobasisitand-backend.onrender.com/api/asistencias', { // <--- CAMBIA ESTO
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(registro)
