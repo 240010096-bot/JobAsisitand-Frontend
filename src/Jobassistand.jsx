@@ -70,6 +70,41 @@ const Avatar = ({ nombre, color = '#3b82f6', size = 36 }) => (
 
 // ─── App principal ────────────────────────────────────────────────────────────
 export default function Jobassistand() {
+
+   ////////////////////
+// --- PEGA ESTO AQUÍ, justo después de function Jobassistand() { ---
+  useEffect(() => {
+    const syncToMongoDB = async () => {
+      // Busca los que tienen sincronizado = 0
+      const pendientes = await db.asistencias.where('sincronizado').equals(0).toArray();
+      
+      for (const registro of pendientes) {
+        try {
+          const response = await fetch('TU_URL_DE_RENDER/api/asistencias', { // <--- CAMBIA ESTO
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(registro)
+          });
+
+          if (response.ok) {
+            // Si el servidor guardó, marcamos como 1 en la base local
+            await db.asistencias.update(registro.id, { sincronizado: 1 });
+            console.log("Sincronizado:", registro.id);
+          }
+        } catch (err) {
+          console.log("Sin conexión, intentamos luego");
+        }
+      }
+    };
+
+    window.addEventListener('online', syncToMongoDB);
+    syncToMongoDB(); // Ejecutar al cargar
+    return () => window.removeEventListener('online', syncToMongoDB);
+  }, []);
+  // ------------------------------------------------------------------
+
+
+  ///////////////////////
   const [usuario,  setUsuario]  = useState(() => { try { return JSON.parse(localStorage.getItem('session_usuario')); } catch { return null; } });
   const [modo,     setModo]     = useState('login');
   const [errorMsg, setErrorMsg] = useState('');
