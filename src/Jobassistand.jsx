@@ -20,11 +20,11 @@ const validarRegistro = ({ nombre, apellido, email, pass, confirm }) => {
 };
 
 const validarTelefono = (tel) => {
-  if (!tel) return true; // opcional
+  if (!tel) return true;
   return /^\d{10}$/.test(tel);
 };
 const validarCURP = (curp) => {
-  if (!curp) return true; // opcional
+  if (!curp) return true;
   const regex = /^[A-Z]{4}\d{6}[A-Z]{6}\d{2}$/;
   return regex.test(curp.toUpperCase());
 };
@@ -41,7 +41,6 @@ const horasDiff = (isoEntrada, isoSalida) => {
 };
 const isoHoy = () => new Date().toISOString().slice(0, 10);
 
-// Para trabajar con fechas en rango local (00:00 - 23:59)
 const inicioDiaLocal = (anio, mes, dia) => {
   const d = new Date(anio, mes, dia, 0, 0, 0, 0);
   return d.toISOString();
@@ -49,10 +48,6 @@ const inicioDiaLocal = (anio, mes, dia) => {
 const finDiaLocal = (anio, mes, dia) => {
   const d = new Date(anio, mes, dia, 23, 59, 59, 999);
   return d.toISOString();
-};
-const hoyLocalISO = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
 };
 
 // ─── Componentes pequeños ─────────────────────────────────────────────────────
@@ -80,7 +75,7 @@ export default function Jobassistand() {
   const [errorMsg, setErrorMsg] = useState('');
   const [okMsg,    setOkMsg]    = useState('');
   const [form,     setForm]     = useState({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
-  const [showPass, setShowPass] = useState(false); // para mostrar contraseñas en login/registro
+  const [showPass, setShowPass] = useState(false);
 
   const limpiar    = () => { setErrorMsg(''); setOkMsg(''); };
   const cambiarModo = m => { setModo(m); setForm({ nombre: '', apellido: '', email: '', pass: '', confirm: '' }); limpiar(); setShowPass(false); };
@@ -187,17 +182,20 @@ function AdminPanel({ usuario, onLogout }) {
   const [okMsg,        setOkMsg]        = useState('');
   const [modalPersonal, setModalPersonal] = useState(false);
 
-  const [fEnc,  setFEnc]  = useState({ nombre: '', apellido: '', email: '', pass: '', confirm: '', areaId: '' });
+  // Estados para encargados independiente
+  const [fEnc,  setFEnc]  = useState({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
+  const [showEncPass, setShowEncPass] = useState(false);
+
+  // Estados para trabajador
   const [fTrab, setFTrab] = useState({ nombre: '', apellido: '', telefono: '', curp: '', areaId: '' });
   const [fArea, setFArea] = useState({ nombre: '', pagoPorHora: '' });
   const [editArea, setEditArea] = useState(null);
-  const [showEncPass, setShowEncPass] = useState(false);
 
-  // Nuevos campos para agregar encargado junto con el área
-  const [encArea, setEncArea] = useState({ 
-    nombre: '', apellido: '', email: '', pass: '', confirm: '', 
-    showPass: false 
-  });
+  // Estados para crear área con encargados múltiples
+  const [encargadosExistentes, setEncargadosExistentes] = useState([]);
+  const [selectedEncargados, setSelectedEncargados] = useState([]); // array de ids
+  const [crearNuevoEnc, setCrearNuevoEnc] = useState(false);
+  const [nuevoEncData, setNuevoEncData] = useState({ nombre: '', apellido: '', email: '', pass: '', confirm: '', showPass: false });
 
   // Calendario
   const hoy = new Date();
@@ -216,11 +214,26 @@ function AdminPanel({ usuario, onLogout }) {
   const [repLoading,setRepLoading]= useState(false);
 
   const limpiar  = () => { setErrorMsg(''); setOkMsg(''); };
+  
   const recargar = async () => {
-    setEncargados(await db.supervisores.where('rol').equals('encargado').toArray());
+    // Cargar encargados (sin campo areaId)
+    const encs = await db.supervisores.where('rol').equals('encargado').toArray();
+    // Para cada encargado, obtener sus áreas
+    const encsConAreas = [];
+    for (const enc of encs) {
+      const relaciones = await db.supervisor_areas.where('supervisorId').equals(enc.id).toArray();
+      const areasIds = relaciones.map(r => r.areaId);
+      const areasNombres = areasIds.length ? (await db.areas.where('id').anyOf(areasIds).toArray()).map(a => a.nombre).join(', ') : 'Sin áreas';
+      encsConAreas.push({ ...enc, areas: areasNombres });
+    }
+    setEncargados(encsConAreas);
     setTrabajadores(await db.trabajadores.toArray());
     setAreas(await db.areas.toArray());
+    // Cargar lista de encargados para el selector múltiple (sin áreas)
+    const encsSimples = await db.supervisores.where('rol').equals('encargado').toArray();
+    setEncargadosExistentes(encsSimples);
   };
+
   useEffect(() => { recargar(); }, [vista]);
 
   // Puntos del calendario
@@ -240,7 +253,7 @@ function AdminPanel({ usuario, onLogout }) {
     cargar();
   }, [vista, calMes, calAnio]);
 
-  // Abrir día calendario — datos por área separada
+  // Abrir día calendario
   const abrirDia = async (anio, mes, dia) => {
     const inicio = inicioDiaLocal(anio, mes, dia);
     const fin    = finDiaLocal(anio, mes, dia);
@@ -249,14 +262,18 @@ function AdminPanel({ usuario, onLogout }) {
     const trabsDB= await db.trabajadores.toArray();
     const encsDB = await db.supervisores.where('rol').equals('encargado').toArray();
 
+    // Obtener relación supervisor -> áreas
+    const supAreas = await db.supervisor_areas.toArray();
+
     const porArea = areasDB.map(area => {
       const regsArea  = regs.filter(r => r.areaId === area.id);
       if (regsArea.length === 0) return null;
 
-      const encargado = encsDB.find(e => e.areaId === area.id);
-      const trabsArea = trabsDB.filter(t => t.areaId === area.id);
+      // Encargados asignados a esta área
+      const encargadosArea = encsDB.filter(enc => supAreas.some(sa => sa.supervisorId === enc.id && sa.areaId === area.id));
       const lugar     = regsArea.find(r => r.lugar && r.lugar !== 'Sin GPS')?.lugar || 'Sin ubicación';
-      const coords    = regsArea.find(r => r.lat)
+      const coords    = regsArea.find(r => r.lat);
+      const trabsArea = trabsDB.filter(t => t.areaId === area.id);
 
       const porTrab = trabsArea.map(t => {
         const nombre = `${t.nombre} ${t.apellido}`;
@@ -269,29 +286,45 @@ function AdminPanel({ usuario, onLogout }) {
       });
 
       const totalGanancia = porTrab.reduce((s, t) => s + t.ganancia, 0);
-      return { area, encargado, lugar, coords: coords ? { lat: coords.lat, lng: coords.lng } : null, trabajadores: porTrab, totalGanancia };
+      return { area, encargados: encargadosArea, lugar, coords: coords ? { lat: coords.lat, lng: coords.lng } : null, trabajadores: porTrab, totalGanancia };
     }).filter(Boolean);
 
     setDatosDia({ porArea, fecha: { anio, mes, dia } });
     setDiaSelec({ anio, mes, dia });
   };
 
-  // ── ÁREA con encargado integrado ────────────────────────────────────────────
-  const agregarAreaConEncargado = async () => {
+  // ── ÁREA con encargados múltiples ───────────────────────────────────────────
+  const crearAreaConEncargados = async () => {
     limpiar();
-    // Validar área
     if (!fArea.nombre.trim()) { setErrorMsg('El nombre del área es obligatorio.'); return; }
-    // Validar encargado
-    if (!encArea.nombre.trim())     { setErrorMsg('Nombre del encargado es obligatorio.'); return; }
-    if (!encArea.apellido.trim())   { setErrorMsg('Apellido del encargado es obligatorio.'); return; }
-    if (!encArea.email.trim())      { setErrorMsg('Correo del encargado es obligatorio.'); return; }
-    if (!validarEmail(encArea.email)) { setErrorMsg('Correo del encargado no válido.'); return; }
-    if (!encArea.pass || encArea.pass.length < 6) { setErrorMsg('La contraseña del encargado debe tener al menos 6 caracteres.'); return; }
-    if (encArea.pass !== encArea.confirm) { setErrorMsg('Las contraseñas del encargado no coinciden.'); return; }
 
-    // Verificar que el correo no exista ya entre supervisores
-    const existeEnc = await db.supervisores.where('email').equalsIgnoreCase(encArea.email.trim()).first();
-    if (existeEnc) { setErrorMsg('Ya existe un supervisor con ese correo.'); return; }
+    let encargadosIds = [];
+
+    if (crearNuevoEnc) {
+      // Validar nuevo encargado
+      if (!nuevoEncData.nombre.trim())     { setErrorMsg('Nombre del encargado es obligatorio.'); return; }
+      if (!nuevoEncData.apellido.trim())   { setErrorMsg('Apellido del encargado es obligatorio.'); return; }
+      if (!nuevoEncData.email.trim())      { setErrorMsg('Correo del encargado es obligatorio.'); return; }
+      if (!validarEmail(nuevoEncData.email)) { setErrorMsg('Correo no válido.'); return; }
+      if (!nuevoEncData.pass || nuevoEncData.pass.length < 6) { setErrorMsg('Contraseña mínimo 6 caracteres.'); return; }
+      if (nuevoEncData.pass !== nuevoEncData.confirm) { setErrorMsg('Las contraseñas no coinciden.'); return; }
+
+      const existe = await db.supervisores.where('email').equalsIgnoreCase(nuevoEncData.email.trim()).first();
+      if (existe) { setErrorMsg('Ya existe un supervisor con ese correo.'); return; }
+
+      const nuevoId = await db.supervisores.add({
+        nombre: nuevoEncData.nombre.trim(), apellido: nuevoEncData.apellido.trim(),
+        email: nuevoEncData.email.trim().toLowerCase(), password: nuevoEncData.pass,
+        rol: 'encargado',
+      });
+      encargadosIds = [nuevoId];
+    } else {
+      if (selectedEncargados.length === 0) {
+        setErrorMsg('Debes seleccionar al menos un encargado existente o crear uno nuevo.');
+        return;
+      }
+      encargadosIds = selectedEncargados;
+    }
 
     // Crear área
     const areaId = await db.areas.add({
@@ -299,17 +332,17 @@ function AdminPanel({ usuario, onLogout }) {
       pagoPorHora: fArea.pagoPorHora ? Number(fArea.pagoPorHora) : 0,
     });
 
-    // Crear encargado vinculado al área
-    await db.supervisores.add({
-      nombre: encArea.nombre.trim(), apellido: encArea.apellido.trim(),
-      email: encArea.email.trim().toLowerCase(), password: encArea.pass,
-      rol: 'encargado', areaId: areaId,
-    });
+    // Asignar área a encargados
+    for (const supId of encargadosIds) {
+      await db.supervisor_areas.add({ supervisorId: supId, areaId });
+    }
 
     // Limpiar formularios
     setFArea({ nombre: '', pagoPorHora: '' });
-    setEncArea({ nombre: '', apellido: '', email: '', pass: '', confirm: '', showPass: false });
-    setOkMsg('Área y encargado registrados exitosamente.');
+    setSelectedEncargados([]);
+    setCrearNuevoEnc(false);
+    setNuevoEncData({ nombre: '', apellido: '', email: '', pass: '', confirm: '', showPass: false });
+    setOkMsg('Área creada y asignada a los encargados seleccionados.');
     recargar();
   };
 
@@ -324,7 +357,12 @@ function AdminPanel({ usuario, onLogout }) {
     recargar();
   };
 
-  const eliminarArea = async id => { await db.areas.delete(id); recargar(); };
+  const eliminarArea = async id => { 
+    // Primero eliminar relaciones supervisor_areas
+    await db.supervisor_areas.where('areaId').equals(id).delete();
+    await db.areas.delete(id);
+    recargar();
+  };
 
   // ── ENCARGADO (registro independiente) ──────────────────────────────────────
   const agregarEncargado = async () => {
@@ -335,16 +373,15 @@ function AdminPanel({ usuario, onLogout }) {
     if (!validarEmail(fEnc.email))    { setErrorMsg('Correo no válido.'); return; }
     if (!fEnc.pass || fEnc.pass.length < 6) { setErrorMsg('Contraseña mínimo 6 caracteres.'); return; }
     if (fEnc.pass !== fEnc.confirm)   { setErrorMsg('Las contraseñas no coinciden.'); return; }
-    if (!fEnc.areaId)                 { setErrorMsg('Asigna un área.'); return; }
     const existe = await db.supervisores.where('email').equalsIgnoreCase(fEnc.email.trim()).first();
     if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
     await db.supervisores.add({
       nombre: fEnc.nombre.trim(), apellido: fEnc.apellido.trim(),
       email: fEnc.email.trim().toLowerCase(), password: fEnc.pass,
-      rol: 'encargado', areaId: Number(fEnc.areaId),
+      rol: 'encargado',
     });
-    setFEnc({ nombre: '', apellido: '', email: '', pass: '', confirm: '', areaId: '' });
-    setOkMsg('Encargado registrado.');
+    setFEnc({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
+    setOkMsg('Encargado registrado. Ahora puedes asignarle áreas desde el módulo de áreas.');
     recargar();
   };
 
@@ -359,7 +396,7 @@ function AdminPanel({ usuario, onLogout }) {
       return;
     }
     if (fTrab.curp && !validarCURP(fTrab.curp)) {
-      setErrorMsg('El formato de CURP no es válido (debe tener 18 caracteres alfanuméricos, ej: GODE561231HDFR).');
+      setErrorMsg('El formato de CURP no es válido (18 caracteres, ej: GODE561231HDFR).');
       return;
     }
     await db.trabajadores.add({
@@ -372,8 +409,13 @@ function AdminPanel({ usuario, onLogout }) {
     recargar();
   };
 
-  const eliminarEncargado  = async id => { await db.supervisores.delete(id); recargar(); };
-  const eliminarTrabajador = async id => { await db.trabajadores.delete(id);  recargar(); };
+  const eliminarEncargado  = async id => {
+    // Eliminar relaciones supervisor_areas
+    await db.supervisor_areas.where('supervisorId').equals(id).delete();
+    await db.supervisores.delete(id);
+    recargar();
+  };
+  const eliminarTrabajador = async id => { await db.trabajadores.delete(id); recargar(); };
   const areaNombre = id => areas.find(a => a.id === Number(id))?.nombre || '—';
 
   // ── REPORTE ───────────────────────────────────────────────────────────────
@@ -464,7 +506,7 @@ function AdminPanel({ usuario, onLogout }) {
 
       <main style={{ padding: '10px 12px 90px' }}>
 
-        {/* ── DASHBOARD ── */}
+        {/* DASHBOARD */}
         {vista === 'dashboard' && (
           <div>
             <h2 style={s.pageTitle}>Dashboard</h2>
@@ -507,39 +549,70 @@ function AdminPanel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── ÁREAS (con registro de encargado integrado) ── */}
+        {/* ÁREAS */}
         {vista === 'areas' && (
           <div>
             <h2 style={s.pageTitle}>Áreas de Trabajo</h2>
             <div style={s.card}>
-              <h3 style={s.cardTitle}>Crear área con encargado</h3>
+              <h3 style={s.cardTitle}>Crear área con encargados</h3>
               <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre del área (ej: Empaque, Campo...)" maxLength={100} style={s.input}
+              <input placeholder="Nombre del área" maxLength={100} style={s.input}
                 value={fArea.nombre} onChange={e => setFArea({ ...fArea, nombre: e.target.value })} onFocus={limpiar} />
               <label style={s.fieldLabel}>Pago por hora (MXN)</label>
               <input type="number" step="0.01" min="0" max="999999.99" placeholder="Ej: 85.00" style={s.input}
                 value={fArea.pagoPorHora} onChange={e => setFArea({ ...fArea, pagoPorHora: e.target.value })} onFocus={limpiar} />
               
               <div style={{ borderTop: '1px solid #1f2937', margin: '16px 0 12px', paddingTop: 12 }}>
-                <label style={s.fieldLabel}>Datos del encargado</label>
-                <input placeholder="Nombre del encargado" maxLength={50} style={s.input} 
-                  value={encArea.nombre} onChange={e => setEncArea({ ...encArea, nombre: e.target.value })} onFocus={limpiar} />
-                <input placeholder="Apellido del encargado" maxLength={50} style={s.input}
-                  value={encArea.apellido} onChange={e => setEncArea({ ...encArea, apellido: e.target.value })} onFocus={limpiar} />
-                <input type="email" placeholder="Correo electrónico" maxLength={100} style={s.input}
-                  value={encArea.email} onChange={e => setEncArea({ ...encArea, email: e.target.value })} onFocus={limpiar} />
-                <div style={{ position: 'relative' }}>
-                  <input type={encArea.showPass ? 'text' : 'password'} placeholder="Contraseña (mín 6)" maxLength={50} style={s.input}
-                    value={encArea.pass} onChange={e => setEncArea({ ...encArea, pass: e.target.value })} onFocus={limpiar} />
-                  <i className={`bi bi-eye${encArea.showPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }}
-                    onClick={() => setEncArea({ ...encArea, showPass: !encArea.showPass })} />
+                <label style={s.fieldLabel}>Encargados responsables</label>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <input type="checkbox" checked={!crearNuevoEnc} onChange={() => setCrearNuevoEnc(false)} />
+                    <span>Seleccionar encargados existentes</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={crearNuevoEnc} onChange={() => setCrearNuevoEnc(true)} />
+                    <span>Crear nuevo encargado</span>
+                  </label>
                 </div>
-                <div style={{ position: 'relative' }}>
-                  <input type={encArea.showPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input}
-                    value={encArea.confirm} onChange={e => setEncArea({ ...encArea, confirm: e.target.value })} onFocus={limpiar} />
-                </div>
+
+                {!crearNuevoEnc && (
+                  <div>
+                    <label style={s.fieldLabel}>Encargados disponibles</label>
+                    <select multiple style={{ ...s.select, height: 'auto', minHeight: 100 }} value={selectedEncargados} onChange={e => {
+                      const opts = Array.from(e.target.selectedOptions, o => Number(o.value));
+                      setSelectedEncargados(opts);
+                    }}>
+                      {encargadosExistentes.map(enc => (
+                        <option key={enc.id} value={enc.id}>{enc.nombre} {enc.apellido} ({enc.email})</option>
+                      ))}
+                    </select>
+                    <p style={{ color: '#6b7280', fontSize: 11, marginTop: 4 }}>Mantén presionado Ctrl/Cmd para seleccionar múltiples</p>
+                  </div>
+                )}
+
+                {crearNuevoEnc && (
+                  <div>
+                    <input placeholder="Nombre del nuevo encargado" maxLength={50} style={s.input}
+                      value={nuevoEncData.nombre} onChange={e => setNuevoEncData({ ...nuevoEncData, nombre: e.target.value })} />
+                    <input placeholder="Apellido" maxLength={50} style={s.input}
+                      value={nuevoEncData.apellido} onChange={e => setNuevoEncData({ ...nuevoEncData, apellido: e.target.value })} />
+                    <input type="email" placeholder="Correo electrónico" maxLength={100} style={s.input}
+                      value={nuevoEncData.email} onChange={e => setNuevoEncData({ ...nuevoEncData, email: e.target.value })} />
+                    <div style={{ position: 'relative' }}>
+                      <input type={nuevoEncData.showPass ? 'text' : 'password'} placeholder="Contraseña (mín 6)" maxLength={50} style={s.input}
+                        value={nuevoEncData.pass} onChange={e => setNuevoEncData({ ...nuevoEncData, pass: e.target.value })} />
+                      <i className={`bi bi-eye${nuevoEncData.showPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer' }}
+                        onClick={() => setNuevoEncData({ ...nuevoEncData, showPass: !nuevoEncData.showPass })} />
+                    </div>
+                    <div style={{ position: 'relative' }}>
+                      <input type={nuevoEncData.showPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input}
+                        value={nuevoEncData.confirm} onChange={e => setNuevoEncData({ ...nuevoEncData, confirm: e.target.value })} />
+                    </div>
+                  </div>
+                )}
               </div>
-              <button onClick={agregarAreaConEncargado} style={s.btnBlue}>Crear Área con Encargado</button>
+
+              <button onClick={crearAreaConEncargados} style={s.btnBlue}>Crear Área</button>
             </div>
 
             {/* Modal editar área */}
@@ -587,7 +660,7 @@ function AdminPanel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── ENCARGADOS (registro independiente) ── */}
+        {/* ENCARGADOS (registro independiente) */}
         {vista === 'encargados' && (
           <div>
             <h2 style={s.pageTitle}>Encargados</h2>
@@ -604,13 +677,9 @@ function AdminPanel({ usuario, onLogout }) {
               <div style={{ position: 'relative' }}>
                 <input type={showEncPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input} value={fEnc.confirm} onChange={e => setFEnc({ ...fEnc, confirm: e.target.value })} onFocus={limpiar} />
               </div>
-              <select style={s.select} value={fEnc.areaId} onChange={e => setFEnc({ ...fEnc, areaId: e.target.value })} onFocus={limpiar}>
-                <option value="">-- Asignar Área --</option>
-                {areas.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-              </select>
               <button onClick={agregarEncargado} style={s.btnBlue}>Registrar Encargado</button>
             </div>
-            <h3 style={s.secLabel}>Encargados registrados ({encargados.length})</h3>
+            <h3 style={s.secLabel}>Encargados registrados</h3>
             {encargados.map(e => (
               <div key={e.id} style={s.listItem}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -618,7 +687,7 @@ function AdminPanel({ usuario, onLogout }) {
                   <div>
                     <div style={{ color: '#fff', fontWeight: 500, fontSize: 14 }}>{e.nombre} {e.apellido}</div>
                     <div style={{ color: '#6b7280', fontSize: 11 }}>{e.email}</div>
-                    <div style={{ color: '#a78bfa', fontSize: 11 }}><i className="bi bi-diagram-3" style={{ marginRight: 4 }} />{areaNombre(e.areaId)}</div>
+                    <div style={{ color: '#a78bfa', fontSize: 11 }}><i className="bi bi-diagram-3" style={{ marginRight: 4 }} />Áreas: {e.areas || 'Sin asignar'}</div>
                   </div>
                 </div>
                 <button onClick={() => eliminarEncargado(e.id)} style={s.btnDanger}><i className="bi bi-trash3" /></button>
@@ -627,7 +696,7 @@ function AdminPanel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── TRABAJADORES ── */}
+        {/* TRABAJADORES */}
         {vista === 'trabajadores' && (
           <div>
             <h2 style={s.pageTitle}>Empleados</h2>
@@ -662,7 +731,7 @@ function AdminPanel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── CALENDARIO ADMIN ── */}
+        {/* CALENDARIO */}
         {vista === 'calendario' && (
           <CalendarioAdmin
             calMes={calMes} setCalMes={setCalMes}
@@ -673,7 +742,7 @@ function AdminPanel({ usuario, onLogout }) {
           />
         )}
 
-        {/* ── REPORTE ── */}
+        {/* REPORTE */}
         {vista === 'reporte' && (
           <div>
             <h2 style={s.pageTitle}>Reporte Semanal</h2>
@@ -803,12 +872,14 @@ function AdminPanel({ usuario, onLogout }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PANEL ENCARGADO — Asistencia rápida con modales de entrada y salida
+// PANEL ENCARGADO
 // ═══════════════════════════════════════════════════════════════════════════════
 function EncargadoPanel({ usuario, onLogout }) {
   const [vista,        setVista]        = useState('lista');
   const [trabajadores, setTrabajadores] = useState([]);
-  const [area,         setArea]         = useState(null);
+  const [areasEncargado, setAreasEncargado] = useState([]);
+  const [areaSeleccionada, setAreaSeleccionada] = useState(null);
+  const [areaObj, setAreaObj] = useState(null);
   const [errorMsg,     setErrorMsg]     = useState('');
   const [okMsg,        setOkMsg]        = useState('');
 
@@ -819,13 +890,11 @@ function EncargadoPanel({ usuario, onLogout }) {
   const [coordsActual, setCoordsActual] = useState(null);
   const [modalEditHora, setModalEditHora] = useState(null);
 
-  // Modales nuevos
   const [modalEntrada, setModalEntrada] = useState(false);
   const [modalSalida,  setModalSalida]  = useState(false);
-  const [seleccionEntrada, setSeleccionEntrada] = useState({}); // { idTrabajador: { checked: true, hora: 'HH:MM' } }
+  const [seleccionEntrada, setSeleccionEntrada] = useState({});
   const [seleccionSalida,  setSeleccionSalida]  = useState({});
 
-  // Calendario
   const hoy = new Date();
   const [calMes,       setCalMes]       = useState(hoy.getMonth());
   const [calAnio,      setCalAnio]      = useState(hoy.getFullYear());
@@ -835,23 +904,49 @@ function EncargadoPanel({ usuario, onLogout }) {
 
   const limpiar = () => { setErrorMsg(''); setOkMsg(''); };
 
+  const cargarAreasDelEncargado = async () => {
+    const relaciones = await db.supervisor_areas.where('supervisorId').equals(usuario.id).toArray();
+    const ids = relaciones.map(r => r.areaId);
+    const areasList = await db.areas.where('id').anyOf(ids).toArray();
+    setAreasEncargado(areasList);
+    if (areasList.length > 0) {
+      setAreaSeleccionada(areasList[0].id);
+      setAreaObj(areasList[0]);
+    }
+  };
+
   const cargarDatos = async () => {
-    const areaObj = await db.areas.get(usuario.areaId);
-    setArea(areaObj);
-    const trabs   = await db.trabajadores.where('areaId').equals(usuario.areaId).toArray();
+    await cargarAreasDelEncargado();
+    await cargarTrabajadoresYRegistros();
+  };
+
+  const cargarTrabajadoresYRegistros = async () => {
+    if (!areaSeleccionada) return;
+    const area = await db.areas.get(areaSeleccionada);
+    setAreaObj(area);
+    const trabs = await db.trabajadores.where('areaId').equals(areaSeleccionada).toArray();
     setTrabajadores(trabs);
     await cargarRegistrosHoy();
   };
 
   const cargarRegistrosHoy = async () => {
+    if (!areaSeleccionada) return;
     const inicio = inicioDiaLocal(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
     const fin    = finDiaLocal(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
     const regs   = (await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray())
-                  .filter(r => r.areaId === usuario.areaId);
+                  .filter(r => r.areaId === areaSeleccionada);
     setRegistrosHoy(regs);
   };
 
-  useEffect(() => { cargarDatos(); }, [vista]);
+  useEffect(() => {
+    cargarDatos();
+  }, [vista]);
+
+  useEffect(() => {
+    if (areaSeleccionada) {
+      cargarTrabajadoresYRegistros();
+    }
+  }, [areaSeleccionada]);
 
   useEffect(() => {
     if (vista !== 'calendario') return;
@@ -859,7 +954,7 @@ function EncargadoPanel({ usuario, onLogout }) {
       const inicio = inicioDiaLocal(calAnio, calMes, 1);
       const fin    = finDiaLocal(calAnio, calMes + 1, 0);
       const regs   = (await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray())
-                    .filter(r => r.areaId === usuario.areaId);
+                    .filter(r => r.areaId === areaSeleccionada);
       const mapa = {};
       regs.forEach(r => {
         const fechaLocal = new Date(r.fecha).toLocaleDateString('sv-SE');
@@ -867,19 +962,19 @@ function EncargadoPanel({ usuario, onLogout }) {
       });
       setDiasConDatos(mapa);
     };
-    cargar();
-  }, [vista, calMes, calAnio]);
+    if (areaSeleccionada) cargar();
+  }, [vista, calMes, calAnio, areaSeleccionada]);
 
   const abrirDia = async (anio, mes, dia) => {
     const inicio = inicioDiaLocal(anio, mes, dia);
     const fin    = finDiaLocal(anio, mes, dia);
     const regs   = (await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray())
-                  .filter(r => r.areaId === usuario.areaId);
+                  .filter(r => r.areaId === areaSeleccionada);
     const encsDB = await db.supervisores.where('rol').equals('encargado').toArray();
     const areasDB= await db.areas.toArray();
-    const enc    = encsDB.find(e => e.areaId === usuario.areaId);
+    const enc    = encsDB.find(e => e.id === usuario.id);
 
-    const porArea = areasDB.filter(a => a.id === usuario.areaId).map(area => {
+    const porArea = areasDB.filter(a => a.id === areaSeleccionada).map(area => {
       const lugar = regs.find(r => r.lugar && r.lugar !== 'Sin GPS')?.lugar || 'Sin ubicación';
       const coords = regs.find(r => r.lat);
       const porTrab = trabajadores.map(t => {
@@ -897,7 +992,6 @@ function EncargadoPanel({ usuario, onLogout }) {
     setDiaSelec({ anio, mes, dia });
   };
 
-  // Obtener GPS en segundo plano
   const obtenerGPS = async () => {
     setCargandoGPS(true);
     try {
@@ -926,9 +1020,8 @@ function EncargadoPanel({ usuario, onLogout }) {
     }
   };
 
-  // Abrir modal de entrada y precargar selecciones/horas
   const abrirModalEntrada = async () => {
-    await obtenerGPS(); // capturar ubicación actual en segundo plano, sin bloquear
+    await obtenerGPS();
     const newSeleccion = {};
     for (const t of trabajadores) {
       const nombre = `${t.nombre} ${t.apellido}`;
@@ -947,10 +1040,8 @@ function EncargadoPanel({ usuario, onLogout }) {
     setModalEntrada(true);
   };
 
-  // Guardar entradas desde el modal
   const guardarEntradas = async () => {
     limpiar();
-    const fechaISOBase = new Date().toISOString(); // se ajustará la hora después
     const operaciones = [];
     for (const [idStr, data] of Object.entries(seleccionEntrada)) {
       if (!data.checked) continue;
@@ -969,7 +1060,7 @@ function EncargadoPanel({ usuario, onLogout }) {
         operaciones.push(db.asistencias.add({
           trabajadorId: nombre, fecha: isoFecha, tipo: 'entrada',
           lat: coordsActual?.lat, lng: coordsActual?.lng, lugar: lugarActual || 'Sin GPS',
-          areaId: usuario.areaId, sincronizado: 0
+          areaId: areaSeleccionada, sincronizado: 0
         }));
       }
     }
@@ -979,14 +1070,13 @@ function EncargadoPanel({ usuario, onLogout }) {
     setOkMsg(`Entradas guardadas correctamente.`);
   };
 
-  // Abrir modal de salida (solo trabajadores con entrada)
   const abrirModalSalida = async () => {
     await obtenerGPS();
     const newSeleccion = {};
     for (const t of trabajadores) {
       const nombre = `${t.nombre} ${t.apellido}`;
       const regEntrada = registrosHoy.find(r => r.trabajadorId === nombre && r.tipo === 'entrada');
-      if (!regEntrada) continue; // solo quienes tienen entrada
+      if (!regEntrada) continue;
       const regSalida = registrosHoy.find(r => r.trabajadorId === nombre && r.tipo === 'salida');
       if (regSalida) {
         const fecha = new Date(regSalida.fecha);
@@ -1022,7 +1112,7 @@ function EncargadoPanel({ usuario, onLogout }) {
         operaciones.push(db.asistencias.add({
           trabajadorId: nombre, fecha: isoFecha, tipo: 'salida',
           lat: coordsActual?.lat, lng: coordsActual?.lng, lugar: lugarActual || 'Sin GPS',
-          areaId: usuario.areaId, sincronizado: 0
+          areaId: areaSeleccionada, sincronizado: 0
         }));
       }
     }
@@ -1032,7 +1122,6 @@ function EncargadoPanel({ usuario, onLogout }) {
     setOkMsg(`Salidas guardadas correctamente.`);
   };
 
-  // Editar hora individual (ya existente)
   const guardarEdicionHora = async (nuevoISO) => {
     if (!modalEditHora || !nuevoISO) return;
     const reg = registrosHoy.find(r =>
@@ -1048,7 +1137,6 @@ function EncargadoPanel({ usuario, onLogout }) {
     setModalEditHora(null);
   };
 
-  // Helpers estado por trabajador
   const tieneEntrada = tid => {
     const t = trabajadores.find(x => x.id === tid);
     if (!t) return null;
@@ -1062,7 +1150,7 @@ function EncargadoPanel({ usuario, onLogout }) {
   const calcGanancia = tid => {
     const e = tieneEntrada(tid); const sal = tieneSalida(tid);
     if (!e || !sal) return null;
-    return (horasDiff(e.fecha, sal.fecha) * (area?.pagoPorHora || 0)).toFixed(2);
+    return (horasDiff(e.fecha, sal.fecha) * (areaObj?.pagoPorHora || 0)).toFixed(2);
   };
 
   const filtrados = trabajadores.filter(t =>
@@ -1076,7 +1164,7 @@ function EncargadoPanel({ usuario, onLogout }) {
           <h1 style={{ color: '#fff', fontSize: 18, margin: 0, fontWeight: 700 }}>
             JOB<span style={{ color: '#3b82f6' }}>ASSISTAND</span>
           </h1>
-          <span style={{ color: '#10b981', fontSize: 11 }}>Encargado · {area?.nombre || '—'}</span>
+          <span style={{ color: '#10b981', fontSize: 11 }}>Encargado · {areaObj?.nombre || '—'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ color: '#9ca3af', fontSize: 12 }}>{usuario.nombre}</span>
@@ -1090,13 +1178,20 @@ function EncargadoPanel({ usuario, onLogout }) {
           <div>
             <h2 style={s.pageTitle}>Registro de Asistencia</h2>
 
-            {area && (
+            {/* Selector de área */}
+            {areasEncargado.length > 1 && (
+              <select style={s.select} value={areaSeleccionada || ''} onChange={e => setAreaSeleccionada(Number(e.target.value))}>
+                {areasEncargado.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+              </select>
+            )}
+
+            {areaObj && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 12, padding: '10px 14px', marginBottom: 12 }}>
                 <span style={{ color: '#10b981', fontSize: 13, fontWeight: 600 }}>
-                  <i className="bi bi-diagram-3" style={{ marginRight: 6 }} />{area.nombre}
+                  <i className="bi bi-diagram-3" style={{ marginRight: 6 }} />{areaObj.nombre}
                 </span>
                 <span style={{ color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>
-                  <i className="bi bi-cash" style={{ marginRight: 4 }} />${(area.pagoPorHora || 0).toFixed(2)}/hr
+                  <i className="bi bi-cash" style={{ marginRight: 4 }} />${(areaObj.pagoPorHora || 0).toFixed(2)}/hr
                 </span>
               </div>
             )}
@@ -1118,7 +1213,7 @@ function EncargadoPanel({ usuario, onLogout }) {
             {trabajadores.length === 0 ? (
               <div style={{ ...s.card, textAlign: 'center', color: '#6b7280' }}>
                 <i className="bi bi-people" style={{ fontSize: 36, marginBottom: 10 }} />
-                <p>No hay empleados en tu área.</p>
+                <p>No hay empleados en esta área.</p>
               </div>
             ) : (
               <>
@@ -1211,7 +1306,6 @@ function EncargadoPanel({ usuario, onLogout }) {
         ))}
       </nav>
 
-      {/* Modal de entrada múltiple */}
       {modalEntrada && (
         <div style={s.overlay} onClick={() => setModalEntrada(false)}>
           <div style={s.modalBox} onClick={e => e.stopPropagation()} style={{ maxHeight: '80vh', overflowY: 'auto' }}>
@@ -1235,7 +1329,6 @@ function EncargadoPanel({ usuario, onLogout }) {
         </div>
       )}
 
-      {/* Modal de salida múltiple */}
       {modalSalida && (
         <div style={s.overlay} onClick={() => setModalSalida(false)}>
           <div style={s.modalBox} onClick={e => e.stopPropagation()} style={{ maxHeight: '80vh', overflowY: 'auto' }}>
@@ -1273,7 +1366,7 @@ function EncargadoPanel({ usuario, onLogout }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MODAL EDITAR HORA (individual)
+// MODAL EDITAR HORA
 // ═══════════════════════════════════════════════════════════════════════════════
 function ModalEditHora({ info, onGuardar, onCerrar }) {
   const actualHHMM = info.isoActual ? new Date(info.isoActual).toTimeString().slice(0,5) : '';
@@ -1306,7 +1399,7 @@ function ModalEditHora({ info, onGuardar, onCerrar }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CALENDARIO — por área separada
+// CALENDARIO
 // ═══════════════════════════════════════════════════════════════════════════════
 function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, setDiaSelec, datosDia, diasConDatos, abrirDia }) {
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -1320,7 +1413,6 @@ function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, set
   return (
     <div>
       <h2 style={s.pageTitle}>Calendario</h2>
-
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '10px 16px', border: '1px solid #1f2937' }}>
         <button onClick={() => { if (calMes === 0) { setCalMes(11); setCalAnio(calAnio - 1); } else setCalMes(calMes - 1); setDiaSelec(null); }}
           style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}>
@@ -1332,7 +1424,6 @@ function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, set
           <i className="bi bi-chevron-right" />
         </button>
       </div>
-
       <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 12 }}>
         <button onClick={() => { setCalAnio(calAnio - 1); setDiaSelec(null); }}
           style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #374151', color: '#9ca3af', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}>
@@ -1344,7 +1435,6 @@ function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, set
           {calAnio + 1}
         </button>
       </div>
-
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', marginBottom: 6 }}>
         {dias.map(d => <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: 11, fontWeight: 600, padding: '4px 0' }}>{d}</div>)}
       </div>
@@ -1369,18 +1459,13 @@ function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, set
           );
         })}
       </div>
-
       {diaSelec && datosDia && (
         <div style={{ marginTop: 16 }}>
           <h4 style={{ color: '#fff', margin: '0 0 12px', fontSize: 15 }}>
             <i className="bi bi-calendar-event" style={{ color: '#3b82f6', marginRight: 8 }} />
             {String(diaSelec.dia).padStart(2,'0')}/{String(diaSelec.mes+1).padStart(2,'0')}/{diaSelec.anio}
           </h4>
-
-          {datosDia.porArea.length === 0 && (
-            <p style={{ color: '#4b5563', textAlign: 'center', fontSize: 13 }}>Sin registros para este día.</p>
-          )}
-
+          {datosDia.porArea.length === 0 && <p style={{ color: '#4b5563', textAlign: 'center', fontSize: 13 }}>Sin registros para este día.</p>}
           {datosDia.porArea.map((bloque, bi) => (
             <div key={bi} style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid #1f2937', borderRadius: 16, padding: 16, marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1388,28 +1473,24 @@ function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, set
                   <div style={{ color: '#10b981', fontWeight: 700, fontSize: 14 }}>
                     <i className="bi bi-diagram-3" style={{ marginRight: 6 }} />{bloque.area.nombre}
                   </div>
-                  {bloque.encargado && (
+                  {bloque.encargados && bloque.encargados.length > 0 && (
                     <div style={{ color: '#a78bfa', fontSize: 12, marginTop: 2 }}>
                       <i className="bi bi-person-badge" style={{ marginRight: 4 }} />
-                      {bloque.encargado.nombre} {bloque.encargado.apellido}
+                      {bloque.encargados.map(e => `${e.nombre} ${e.apellido}`).join(', ')}
                     </div>
                   )}
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 15 }}>
-                    ${bloque.totalGanancia.toFixed(2)}
-                  </div>
+                  <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 15 }}>${bloque.totalGanancia.toFixed(2)}</div>
                   <div style={{ color: '#6b7280', fontSize: 10 }}>ganancia total</div>
                 </div>
               </div>
-
               {bloque.lugar && bloque.lugar !== 'Sin ubicación' && (
                 <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: 8, padding: '7px 10px', marginBottom: 10 }}>
                   <i className="bi bi-geo-alt-fill" style={{ color: '#10b981', fontSize: 12, marginTop: 2, flexShrink: 0 }} />
                   <span style={{ color: '#9ca3af', fontSize: 11, lineHeight: 1.4 }}>{bloque.lugar}</span>
                 </div>
               )}
-
               {bloque.trabajadores.map((t, ti) => (
                 <div key={ti} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
