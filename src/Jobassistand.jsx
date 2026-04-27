@@ -193,6 +193,12 @@ function AdminPanel({ usuario, onLogout }) {
   const [editArea, setEditArea] = useState(null);
   const [showEncPass, setShowEncPass] = useState(false);
 
+  // Nuevos campos para agregar encargado junto con el área
+  const [encArea, setEncArea] = useState({ 
+    nombre: '', apellido: '', email: '', pass: '', confirm: '', 
+    showPass: false 
+  });
+
   // Calendario
   const hoy = new Date();
   const [calMes,       setCalMes]       = useState(hoy.getMonth());
@@ -270,16 +276,40 @@ function AdminPanel({ usuario, onLogout }) {
     setDiaSelec({ anio, mes, dia });
   };
 
-  // ── ÁREA ──────────────────────────────────────────────────────────────────
-  const agregarArea = async () => {
+  // ── ÁREA con encargado integrado ────────────────────────────────────────────
+  const agregarAreaConEncargado = async () => {
     limpiar();
+    // Validar área
     if (!fArea.nombre.trim()) { setErrorMsg('El nombre del área es obligatorio.'); return; }
-    await db.areas.add({
+    // Validar encargado
+    if (!encArea.nombre.trim())     { setErrorMsg('Nombre del encargado es obligatorio.'); return; }
+    if (!encArea.apellido.trim())   { setErrorMsg('Apellido del encargado es obligatorio.'); return; }
+    if (!encArea.email.trim())      { setErrorMsg('Correo del encargado es obligatorio.'); return; }
+    if (!validarEmail(encArea.email)) { setErrorMsg('Correo del encargado no válido.'); return; }
+    if (!encArea.pass || encArea.pass.length < 6) { setErrorMsg('La contraseña del encargado debe tener al menos 6 caracteres.'); return; }
+    if (encArea.pass !== encArea.confirm) { setErrorMsg('Las contraseñas del encargado no coinciden.'); return; }
+
+    // Verificar que el correo no exista ya entre supervisores
+    const existeEnc = await db.supervisores.where('email').equalsIgnoreCase(encArea.email.trim()).first();
+    if (existeEnc) { setErrorMsg('Ya existe un supervisor con ese correo.'); return; }
+
+    // Crear área
+    const areaId = await db.areas.add({
       nombre: fArea.nombre.trim(),
       pagoPorHora: fArea.pagoPorHora ? Number(fArea.pagoPorHora) : 0,
     });
+
+    // Crear encargado vinculado al área
+    await db.supervisores.add({
+      nombre: encArea.nombre.trim(), apellido: encArea.apellido.trim(),
+      email: encArea.email.trim().toLowerCase(), password: encArea.pass,
+      rol: 'encargado', areaId: areaId,
+    });
+
+    // Limpiar formularios
     setFArea({ nombre: '', pagoPorHora: '' });
-    setOkMsg('Área creada.');
+    setEncArea({ nombre: '', apellido: '', email: '', pass: '', confirm: '', showPass: false });
+    setOkMsg('Área y encargado registrados exitosamente.');
     recargar();
   };
 
@@ -296,7 +326,7 @@ function AdminPanel({ usuario, onLogout }) {
 
   const eliminarArea = async id => { await db.areas.delete(id); recargar(); };
 
-  // ── ENCARGADO ─────────────────────────────────────────────────────────────
+  // ── ENCARGADO (registro independiente) ──────────────────────────────────────
   const agregarEncargado = async () => {
     limpiar();
     if (!fEnc.nombre.trim())          { setErrorMsg('Nombre obligatorio.'); return; }
@@ -318,7 +348,7 @@ function AdminPanel({ usuario, onLogout }) {
     recargar();
   };
 
-  // ── TRABAJADOR con validaciones de teléfono y CURP ─────────────────────────
+  // ── TRABAJADOR ────────────────────────────────────────────────────────────
   const agregarTrabajador = async () => {
     limpiar();
     if (!fTrab.nombre.trim())   { setErrorMsg('Nombre obligatorio.'); return; }
@@ -477,19 +507,39 @@ function AdminPanel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── ÁREAS ── */}
+        {/* ── ÁREAS (con registro de encargado integrado) ── */}
         {vista === 'areas' && (
           <div>
             <h2 style={s.pageTitle}>Áreas de Trabajo</h2>
             <div style={s.card}>
-              <h3 style={s.cardTitle}>Crear área</h3>
+              <h3 style={s.cardTitle}>Crear área con encargado</h3>
               <Err msg={errorMsg} /><Ok msg={okMsg} />
               <input placeholder="Nombre del área (ej: Empaque, Campo...)" maxLength={100} style={s.input}
                 value={fArea.nombre} onChange={e => setFArea({ ...fArea, nombre: e.target.value })} onFocus={limpiar} />
               <label style={s.fieldLabel}>Pago por hora (MXN)</label>
               <input type="number" step="0.01" min="0" max="999999.99" placeholder="Ej: 85.00" style={s.input}
                 value={fArea.pagoPorHora} onChange={e => setFArea({ ...fArea, pagoPorHora: e.target.value })} onFocus={limpiar} />
-              <button onClick={agregarArea} style={s.btnBlue}>Crear Área</button>
+              
+              <div style={{ borderTop: '1px solid #1f2937', margin: '16px 0 12px', paddingTop: 12 }}>
+                <label style={s.fieldLabel}>Datos del encargado</label>
+                <input placeholder="Nombre del encargado" maxLength={50} style={s.input} 
+                  value={encArea.nombre} onChange={e => setEncArea({ ...encArea, nombre: e.target.value })} onFocus={limpiar} />
+                <input placeholder="Apellido del encargado" maxLength={50} style={s.input}
+                  value={encArea.apellido} onChange={e => setEncArea({ ...encArea, apellido: e.target.value })} onFocus={limpiar} />
+                <input type="email" placeholder="Correo electrónico" maxLength={100} style={s.input}
+                  value={encArea.email} onChange={e => setEncArea({ ...encArea, email: e.target.value })} onFocus={limpiar} />
+                <div style={{ position: 'relative' }}>
+                  <input type={encArea.showPass ? 'text' : 'password'} placeholder="Contraseña (mín 6)" maxLength={50} style={s.input}
+                    value={encArea.pass} onChange={e => setEncArea({ ...encArea, pass: e.target.value })} onFocus={limpiar} />
+                  <i className={`bi bi-eye${encArea.showPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }}
+                    onClick={() => setEncArea({ ...encArea, showPass: !encArea.showPass })} />
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input type={encArea.showPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input}
+                    value={encArea.confirm} onChange={e => setEncArea({ ...encArea, confirm: e.target.value })} onFocus={limpiar} />
+                </div>
+              </div>
+              <button onClick={agregarAreaConEncargado} style={s.btnBlue}>Crear Área con Encargado</button>
             </div>
 
             {/* Modal editar área */}
@@ -537,7 +587,7 @@ function AdminPanel({ usuario, onLogout }) {
           </div>
         )}
 
-        {/* ── ENCARGADOS ── */}
+        {/* ── ENCARGADOS (registro independiente) ── */}
         {vista === 'encargados' && (
           <div>
             <h2 style={s.pageTitle}>Encargados</h2>
@@ -553,7 +603,6 @@ function AdminPanel({ usuario, onLogout }) {
               </div>
               <div style={{ position: 'relative' }}>
                 <input type={showEncPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input} value={fEnc.confirm} onChange={e => setFEnc({ ...fEnc, confirm: e.target.value })} onFocus={limpiar} />
-                <i className={`bi bi-eye${showEncPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }} onClick={() => setShowEncPass(!showEncPass)} />
               </div>
               <select style={s.select} value={fEnc.areaId} onChange={e => setFEnc({ ...fEnc, areaId: e.target.value })} onFocus={limpiar}>
                 <option value="">-- Asignar Área --</option>
