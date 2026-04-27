@@ -1,1318 +1,175 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from './db';
 
-// ─── Validaciones ─────────────────────────────────────────────────────────────
-const validarEmail  = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
-const validarLogin  = ({ email, pass }) => {
-  if (!email.trim())        return 'El correo es obligatorio.';
-  if (!validarEmail(email)) return 'Correo no válido.';
-  if (!pass)                return 'La contraseña es obligatoria.';
-  return null;
-};
-const validarRegistro = ({ nombre, apellido, email, pass, confirm }) => {
-  if (!nombre.trim())           return 'El nombre es obligatorio.';
-  if (!apellido.trim())         return 'El apellido es obligatorio.';
-  if (!email.trim())            return 'El correo es obligatorio.';
-  if (!validarEmail(email))     return 'Correo no válido.';
-  if (!pass || pass.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
-  if (pass !== confirm)         return 'Las contraseñas no coinciden.';
-  return null;
-};
+// --- Helpers de UI ---
+const inputStyle = { width: '100%', padding: '12px', marginBottom: '10px', borderRadius: '8px', border: '1px solid #374151', backgroundColor: '#1f2937', color: '#fff' };
+const modalOverlay = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' };
+const modalContent = { backgroundColor: '#111827', width: '100%', maxWidth: '500px', borderRadius: '15px', padding: '20px', maxHeight: '80vh', overflowY: 'auto', border: '1px solid #374151' };
 
-// ─── Helpers tiempo ───────────────────────────────────────────────────────────
-const hhmm = iso => {
-  if (!iso) return '--:--';
-  const d = new Date(iso);
-  return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-};
-const horasDiff = (isoEntrada, isoSalida) => {
-  if (!isoEntrada || !isoSalida) return 0;
-  return Math.max(0, (new Date(isoSalida) - new Date(isoEntrada)) / 3_600_000);
-};
-const isoHoy = () => new Date().toISOString().slice(0, 10);
+function Jobassistand() {
+  const [usuario, setUsuario] = useState(() => JSON.parse(localStorage.getItem('session_usuario')));
+  const [activeTab, setActiveTab] = useState('asistencia');
+  const [listaTrabajadores, setListaTrabajadores] = useState([]);
+  const [asistenciasHoy, setAsistenciasHoy] = useState([]);
+  
+  // Estados de UI
+  const [mostrarPass, setMostrarPass] = useState(false);
+  const [modalAbierto, setModalAbierto] = useState(null); // 'entrada' | 'retardo' | 'salida'
+  const [registrosCalendario, setRegistrosCalendario] = useState([]);
 
-// ─── Componentes pequeños ─────────────────────────────────────────────────────
-const Err = ({ msg }) => msg ? (
-  <div style={s.errBanner}><i className="bi bi-exclamation-triangle-fill" style={{ marginRight: 7 }} />{msg}</div>
-) : null;
-const Ok = ({ msg }) => msg ? (
-  <div style={s.okBanner}><i className="bi bi-check-circle-fill" style={{ marginRight: 7 }} />{msg}</div>
-) : null;
-const Avatar = ({ nombre, color = '#3b82f6', size = 36 }) => (
-  <div style={{
-    width: size, height: size, borderRadius: '50%',
-    backgroundColor: `${color}22`, border: `1px solid ${color}44`,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color, fontWeight: 'bold', fontSize: size * 0.38, flexShrink: 0,
-  }}>
-    {(nombre || '?').charAt(0).toUpperCase()}
-  </div>
-);
+  const hoy = new Date().toISOString().split('T')[0];
+  const esAdmin = usuario?.rol === 'admin';
 
-// ─── App principal ────────────────────────────────────────────────────────────
-export default function Jobassistand() {
-  const [usuario,  setUsuario]  = useState(() => { try { return JSON.parse(localStorage.getItem('session_usuario')); } catch { return null; } });
-  const [modo,     setModo]     = useState('login');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [okMsg,    setOkMsg]    = useState('');
-  const [form,     setForm]     = useState({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
-
-  const limpiar    = () => { setErrorMsg(''); setOkMsg(''); };
-  const cambiarModo = m => { setModo(m); setForm({ nombre: '', apellido: '', email: '', pass: '', confirm: '' }); limpiar(); };
-
-  const handleLogin = async () => {
-    limpiar();
-    const err = validarLogin(form);
-    if (err) { setErrorMsg(err); return; }
-    const user = await db.supervisores.where('email').equalsIgnoreCase(form.email.trim()).first();
-    if (user && user.password === form.pass) {
-      localStorage.setItem('session_usuario', JSON.stringify(user));
-      setUsuario(user);
-    } else {
-      setErrorMsg('Correo o contraseña incorrectos.');
-    }
-  };
-
-  const handleRegistro = async () => {
-    limpiar();
-    const err = validarRegistro(form);
-    if (err) { setErrorMsg(err); return; }
-    const existe = await db.supervisores.where('email').equalsIgnoreCase(form.email.trim()).first();
-    if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
-    await db.supervisores.add({
-      nombre: form.nombre.trim(), apellido: form.apellido.trim(),
-      email: form.email.trim().toLowerCase(), password: form.pass,
-      rol: 'admin', areaId: null,
-    });
-    setOkMsg('Cuenta creada. Ahora puedes ingresar.');
-    cambiarModo('login');
-  };
-
-  const cerrarSesion = () => {
-    localStorage.removeItem('session_usuario');
-    setUsuario(null);
-    setForm({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
-    limpiar();
-  };
-
-  if (!usuario) return (
-    <div style={s.bg}>
-      <div style={s.loginCard}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <i className="bi bi-shield-lock" style={{ fontSize: 48, color: '#3b82f6' }} />
-          <h2 style={{ color: '#fff', margin: '10px 0 4px', fontWeight: 700, fontSize: 22 }}>
-            JOB<span style={{ color: '#3b82f6' }}>ASSISTAND</span>
-          </h2>
-          <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>Sistema de asistencia</p>
-        </div>
-        <div style={{ display: 'flex', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 4, marginBottom: 20 }}>
-          {[['login', 'Ingresar'], ['register', 'Crear cuenta']].map(([m, label]) => (
-            <button key={m} onClick={() => cambiarModo(m)} style={{
-              flex: 1, padding: '9px 0', border: 'none', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              backgroundColor: modo === m ? '#3b82f6' : 'transparent',
-              color: modo === m ? '#fff' : '#6b7280',
-            }}>{label}</button>
-          ))}
-        </div>
-        <Err msg={errorMsg} /><Ok msg={okMsg} />
-        {modo === 'register' && (
-          <>
-            <input placeholder="Nombre" style={s.input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} onFocus={limpiar} />
-            <input placeholder="Apellido" style={s.input} value={form.apellido} onChange={e => setForm({ ...form, apellido: e.target.value })} onFocus={limpiar} />
-          </>
-        )}
-        <input type="email" placeholder="Correo electrónico" style={s.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} onFocus={limpiar} />
-        <input type="password" placeholder="Contraseña" style={s.input} value={form.pass} onChange={e => setForm({ ...form, pass: e.target.value })} onFocus={limpiar}
-          onKeyDown={e => e.key === 'Enter' && modo === 'login' && handleLogin()} />
-        {modo === 'register' && (
-          <input type="password" placeholder="Confirmar contraseña" style={s.input} value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} onFocus={limpiar} />
-        )}
-        <button onClick={modo === 'login' ? handleLogin : handleRegistro} style={s.btnBlue}>
-          {modo === 'login' ? 'Ingresar' : 'Crear Cuenta Admin'}
-        </button>
-        {modo === 'register' && (
-          <p style={{ color: '#4b5563', fontSize: 11, textAlign: 'center', marginTop: 12 }}>Las cuentas creadas aquí son de administrador.</p>
-        )}
-      </div>
-    </div>
-  );
-
-  if (usuario.rol === 'admin')     return <AdminPanel    usuario={usuario} onLogout={cerrarSesion} />;
-  if (usuario.rol === 'encargado') return <EncargadoPanel usuario={usuario} onLogout={cerrarSesion} />;
-  return <div style={{ color: '#fff', padding: 40 }}>Rol desconocido. <button onClick={cerrarSesion}>Salir</button></div>;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PANEL ADMINISTRADOR
-// ═══════════════════════════════════════════════════════════════════════════════
-function AdminPanel({ usuario, onLogout }) {
-  const [vista,        setVista]        = useState('dashboard');
-  const [encargados,   setEncargados]   = useState([]);
-  const [trabajadores, setTrabajadores] = useState([]);
-  const [areas,        setAreas]        = useState([]);
-  const [errorMsg,     setErrorMsg]     = useState('');
-  const [okMsg,        setOkMsg]        = useState('');
-  const [modalPersonal, setModalPersonal] = useState(false);
-
-  const [fEnc,  setFEnc]  = useState({ nombre: '', apellido: '', email: '', pass: '', areaId: '' });
-  const [fTrab, setFTrab] = useState({ nombre: '', apellido: '', telefono: '', curp: '', areaId: '' });
-  // ÁREA: nombre + pagoPorHora (ya no en trabajador)
-  const [fArea, setFArea] = useState({ nombre: '', pagoPorHora: '' });
-  // Para editar área
-  const [editArea, setEditArea] = useState(null); // { id, nombre, pagoPorHora }
-
-  // Calendario
-  const hoy = new Date();
-  const [calMes,       setCalMes]       = useState(hoy.getMonth());
-  const [calAnio,      setCalAnio]      = useState(hoy.getFullYear());
-  const [diaSelec,     setDiaSelec]     = useState(null);
-  const [datosDia,     setDatosDia]     = useState(null); // { porArea: [] }
-  const [diasConDatos, setDiasConDatos] = useState({});
-
-  // Reporte
-  const lunesDeEsta = new Date(hoy); lunesDeEsta.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
-  const fmtISO = d => d.toISOString().slice(0, 10);
-  const [repInicio, setRepInicio] = useState(fmtISO(lunesDeEsta));
-  const [repFin,    setRepFin]    = useState(fmtISO(hoy));
-  const [repDatos,  setRepDatos]  = useState(null);
-  const [repLoading,setRepLoading]= useState(false);
-
-  const limpiar  = () => { setErrorMsg(''); setOkMsg(''); };
-  const recargar = async () => {
-    setEncargados(await db.supervisores.where('rol').equals('encargado').toArray());
-    setTrabajadores(await db.trabajadores.toArray());
-    setAreas(await db.areas.toArray());
-  };
-  useEffect(() => { recargar(); }, [vista]);
-
-  // Puntos del calendario
+  // 1. Carga de Datos y Sincronización con Calendario
   useEffect(() => {
-    if (vista !== 'calendario') return;
-    const cargar = async () => {
-      const inicio = new Date(calAnio, calMes, 1).toISOString();
-      const fin    = new Date(calAnio, calMes + 1, 0, 23, 59, 59).toISOString();
-      const regs   = await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray();
-      const mapa   = {};
-      regs.forEach(r => { mapa[r.fecha.slice(0, 10)] = true; });
-      setDiasConDatos(mapa);
+    const cargarDatos = async () => {
+      const t = await db.trabajadores.toArray();
+      const a = await db.asistencias.where('fecha').equals(hoy).toArray();
+      const todos = await db.asistencias.toArray();
+      setListaTrabajadores(t);
+      setAsistenciasHoy(a);
+      setRegistrosCalendario(todos);
     };
-    cargar();
-  }, [vista, calMes, calAnio]);
+    cargarDatos();
+  }, [modalAbierto]);
 
-  // Abrir día calendario — datos por área separada
-  const abrirDia = async (anio, mes, dia) => {
-    const inicio = new Date(anio, mes, dia, 0, 0, 0).toISOString();
-    const fin    = new Date(anio, mes, dia, 23, 59, 59).toISOString();
-    const regs   = await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray();
-    const areasDB= await db.areas.toArray();
-    const trabsDB= await db.trabajadores.toArray();
-    const encsDB = await db.supervisores.where('rol').equals('encargado').toArray();
-
-    const porArea = areasDB.map(area => {
-      const regsArea  = regs.filter(r => r.areaId === area.id);
-      if (regsArea.length === 0) return null;
-
-      const encargado = encsDB.find(e => e.areaId === area.id);
-      const trabsArea = trabsDB.filter(t => t.areaId === area.id);
-      const lugar     = regsArea.find(r => r.lugar && r.lugar !== 'Sin GPS')?.lugar || 'Sin ubicación';
-      const coords    = regsArea.find(r => r.lat)
-
-      // Agrupar por trabajador: entrada + salida
-      const porTrab = trabsArea.map(t => {
-        const nombre = `${t.nombre} ${t.apellido}`;
-        const entrada = regsArea.find(r => r.trabajadorId === nombre && r.tipo === 'entrada');
-        const salida  = regsArea.find(r => r.trabajadorId === nombre && r.tipo === 'salida');
-        const horas   = horasDiff(entrada?.fecha, salida?.fecha);
-        const ganancia = horas * (area.pagoPorHora || 0);
-        const presente = !!entrada;
-        return { nombre, entrada: entrada?.fecha || null, salida: salida?.fecha || null, horas, ganancia, presente };
-      });
-
-      const totalGanancia = porTrab.reduce((s, t) => s + t.ganancia, 0);
-      return { area, encargado, lugar, coords: coords ? { lat: coords.lat, lng: coords.lng } : null, trabajadores: porTrab, totalGanancia };
-    }).filter(Boolean);
-
-    setDatosDia({ porArea, fecha: { anio, mes, dia } });
-    setDiaSelec({ anio, mes, dia });
-  };
-
-  // ── ÁREA ──────────────────────────────────────────────────────────────────
-  const agregarArea = async () => {
-    limpiar();
-    if (!fArea.nombre.trim()) { setErrorMsg('El nombre del área es obligatorio.'); return; }
-    await db.areas.add({
-      nombre: fArea.nombre.trim(),
-      pagoPorHora: fArea.pagoPorHora ? Number(fArea.pagoPorHora) : 0,
-    });
-    setFArea({ nombre: '', pagoPorHora: '' });
-    setOkMsg('Área creada.');
-    recargar();
-  };
-
-  const guardarEditArea = async () => {
-    if (!editArea) return;
-    await db.areas.update(editArea.id, {
-      nombre: editArea.nombre.trim(),
-      pagoPorHora: editArea.pagoPorHora ? Number(editArea.pagoPorHora) : 0,
-    });
-    setEditArea(null);
-    setOkMsg('Área actualizada.');
-    recargar();
-  };
-
-  const eliminarArea = async id => { await db.areas.delete(id); recargar(); };
-
-  // ── ENCARGADO ─────────────────────────────────────────────────────────────
-  const agregarEncargado = async () => {
-    limpiar();
-    if (!fEnc.nombre.trim())          { setErrorMsg('Nombre obligatorio.'); return; }
-    if (!fEnc.apellido.trim())        { setErrorMsg('Apellido obligatorio.'); return; }
-    if (!fEnc.email.trim())           { setErrorMsg('Correo obligatorio.'); return; }
-    if (!validarEmail(fEnc.email))    { setErrorMsg('Correo no válido.'); return; }
-    if (!fEnc.pass || fEnc.pass.length < 6) { setErrorMsg('Contraseña mínimo 6 caracteres.'); return; }
-    if (!fEnc.areaId)                 { setErrorMsg('Asigna un área.'); return; }
-    const existe = await db.supervisores.where('email').equalsIgnoreCase(fEnc.email.trim()).first();
-    if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
-    await db.supervisores.add({
-      nombre: fEnc.nombre.trim(), apellido: fEnc.apellido.trim(),
-      email: fEnc.email.trim().toLowerCase(), password: fEnc.pass,
-      rol: 'encargado', areaId: Number(fEnc.areaId),
-    });
-    setFEnc({ nombre: '', apellido: '', email: '', pass: '', areaId: '' });
-    setOkMsg('Encargado registrado.');
-    recargar();
-  };
-
-  // ── TRABAJADOR ────────────────────────────────────────────────────────────
-  const agregarTrabajador = async () => {
-    limpiar();
-    if (!fTrab.nombre.trim())   { setErrorMsg('Nombre obligatorio.'); return; }
-    if (!fTrab.apellido.trim()) { setErrorMsg('Apellido obligatorio.'); return; }
-    if (!fTrab.areaId)          { setErrorMsg('Asigna un área.'); return; }
-    await db.trabajadores.add({
-      nombre: fTrab.nombre.trim(), apellido: fTrab.apellido.trim(),
-      telefono: fTrab.telefono.trim(), curp: fTrab.curp.trim().toUpperCase(),
-      areaId: Number(fTrab.areaId),
-    });
-    setFTrab({ nombre: '', apellido: '', telefono: '', curp: '', areaId: '' });
-    setOkMsg('Trabajador registrado.');
-    recargar();
-  };
-
-  const eliminarEncargado  = async id => { await db.supervisores.delete(id); recargar(); };
-  const eliminarTrabajador = async id => { await db.trabajadores.delete(id);  recargar(); };
-  const areaNombre = id => areas.find(a => a.id === Number(id))?.nombre || '—';
-
-  // ── REPORTE ───────────────────────────────────────────────────────────────
-  const generarReporte = async () => {
-    setRepLoading(true); setRepDatos(null);
-    try {
-      const inicio = new Date(repInicio + 'T00:00:00').toISOString();
-      const fin    = new Date(repFin    + 'T23:59:59').toISOString();
-      const regs   = await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray();
-      const trabs  = await db.trabajadores.toArray();
-      const areasL = await db.areas.toArray();
-
-      const diasRango = [];
-      const cur = new Date(repInicio + 'T12:00:00');
-      const end = new Date(repFin    + 'T12:00:00');
-      while (cur <= end) { if (cur.getDay() !== 0) diasRango.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
-
-      const filas = trabs.map(t => {
-        const nombre = `${t.nombre} ${t.apellido}`;
-        const area   = areasL.find(a => a.id === Number(t.areaId));
-        const regsT  = regs.filter(r => r.trabajadorId === nombre);
-        // Calcular horas reales con pares entrada/salida
-        let totalHoras = 0;
-        diasRango.forEach(fecha => {
-          const e = regsT.find(r => r.tipo === 'entrada' && r.fecha.slice(0,10) === fecha);
-          const sal = regsT.find(r => r.tipo === 'salida'  && r.fecha.slice(0,10) === fecha);
-          totalHoras += horasDiff(e?.fecha, sal?.fecha);
-        });
-        const diasPresente = new Set(regsT.filter(r => r.tipo==='entrada').map(r => r.fecha.slice(0,10))).size;
-        const diasAusente  = Math.max(0, diasRango.length - diasPresente);
-        const pph          = area?.pagoPorHora || 0;
-        const totalPago    = totalHoras * pph;
-        return { nombre, area: area?.nombre || '—', diasPresente, diasAusente, totalHoras, pph, totalPago };
-      });
-
-      setRepDatos({ filas, totalDiasLab: diasRango.length, inicio: repInicio, fin: repFin });
-    } finally { setRepLoading(false); }
-  };
-
-  const descargarPDF = () => {
-    if (!repDatos) return;
-    if (!window.jspdf) { alert('jsPDF no cargado.'); return; }
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    doc.setFillColor(11,14,20); doc.rect(0,0,297,297,'F');
-    doc.setFontSize(20); doc.setTextColor(59,130,246); doc.text('JOBASSISTAND', 14, 18);
-    doc.setFontSize(11); doc.setTextColor(200,200,200); doc.text('Reporte Semanal de Asistencias y Pagos', 14, 25);
-    doc.setFontSize(9); doc.setTextColor(107,114,128);
-    doc.text(`Periodo: ${repDatos.inicio}  al  ${repDatos.fin}   |   Días laborables: ${repDatos.totalDiasLab}`, 14, 31);
-    doc.text(`Generado: ${new Date().toLocaleString('es-MX')}`, 14, 36);
-    const cols = ['Empleado','Área','Días Presentes','Días Ausentes','Horas Trabajadas','Pago/Hr','Total MXN'];
-    const rows = repDatos.filas.map(f => [
-      f.nombre, f.area, f.diasPresente, f.diasAusente,
-      f.totalHoras.toFixed(1),
-      f.pph > 0 ? `$${f.pph.toFixed(2)}` : 'N/A',
-      f.pph > 0 ? `$${f.totalPago.toFixed(2)}` : 'N/A',
-    ]);
-    const totP = repDatos.filas.reduce((a,f)=>a+f.diasPresente,0);
-    const totA = repDatos.filas.reduce((a,f)=>a+f.diasAusente,0);
-    const totH = repDatos.filas.reduce((a,f)=>a+f.totalHoras,0);
-    const totT = repDatos.filas.reduce((a,f)=>a+f.totalPago,0);
-    rows.push(['TOTAL','',totP,totA,totH.toFixed(1),'',`$${totT.toFixed(2)}`]);
-    doc.autoTable({
-      startY: 42, head: [cols], body: rows, theme: 'grid',
-      headStyles: { fillColor:[30,41,59], textColor:[148,163,184], fontStyle:'bold', fontSize:8 },
-      bodyStyles: { fillColor:[15,23,42], textColor:[226,232,240], fontSize:8 },
-      alternateRowStyles: { fillColor:[20,30,55] },
-      didParseCell: data => { if (data.row.index===rows.length-1) { data.cell.styles.fillColor=[30,64,175]; data.cell.styles.textColor=[255,255,255]; data.cell.styles.fontStyle='bold'; } },
-      margin: { left:14, right:14 },
-    });
-    doc.save(`reporte_${repDatos.inicio}.pdf`);
-  };
-
-  // ── RENDER ────────────────────────────────────────────────────────────────
-  return (
-    <div style={s.bg}>
-      <header style={s.header}>
-        <div>
-          <h1 style={{ color: '#fff', fontSize: 18, margin: 0, fontWeight: 700 }}>
-            JOB<span style={{ color: '#3b82f6' }}>ASSISTAND</span>
-          </h1>
-          <span style={{ color: '#6b7280', fontSize: 11 }}>Administrador</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ color: '#9ca3af', fontSize: 12 }}>{usuario.nombre}</span>
-          <button onClick={onLogout} style={s.btnLogout}><i className="bi bi-box-arrow-right" /></button>
-        </div>
-      </header>
-
-      <main style={{ padding: '10px 12px 90px' }}>
-
-        {/* ── DASHBOARD ── */}
-        {vista === 'dashboard' && (
-          <div>
-            <h2 style={s.pageTitle}>Dashboard</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-              <div style={{ ...s.statCard, cursor: 'pointer' }} onClick={() => setModalPersonal(true)}>
-                <i className="bi bi-people" style={{ fontSize: 26, color: '#3b82f6' }} />
-                <div style={{ color: '#fff', fontSize: 22, fontWeight: 700, margin: '6px 0 0' }}>{trabajadores.length}</div>
-                <div style={{ color: '#6b7280', fontSize: 11 }}>Empleados</div>
-                <div style={{ color: '#3b82f6', fontSize: 10, marginTop: 2 }}>Ver lista</div>
-              </div>
-              <div style={s.statCard}>
-                <i className="bi bi-person-badge" style={{ fontSize: 26, color: '#a78bfa' }} />
-                <div style={{ color: '#fff', fontSize: 22, fontWeight: 700, margin: '6px 0 0' }}>{encargados.length}</div>
-                <div style={{ color: '#6b7280', fontSize: 11 }}>Encargados</div>
-              </div>
-              <div style={s.statCard}>
-                <i className="bi bi-diagram-3" style={{ fontSize: 26, color: '#10b981' }} />
-                <div style={{ color: '#fff', fontSize: 22, fontWeight: 700, margin: '6px 0 0' }}>{areas.length}</div>
-                <div style={{ color: '#6b7280', fontSize: 11 }}>Áreas</div>
-              </div>
-              <div style={s.statCard}>
-                <i className="bi bi-geo-alt" style={{ fontSize: 26, color: '#f59e0b' }} />
-                <div style={{ color: '#fff', fontSize: 14, fontWeight: 700, margin: '6px 0 0' }}>GPS</div>
-                <div style={{ color: '#6b7280', fontSize: 11 }}>Activo</div>
-              </div>
-            </div>
-            <div style={s.card}>
-              <h3 style={s.cardTitle}>Acciones rápidas</h3>
-              {[
-                { label: 'Nueva Área',      icon: 'bi-diagram-3',    v: 'areas' },
-                { label: 'Nuevo Encargado', icon: 'bi-person-badge', v: 'encargados' },
-                { label: 'Nuevo Empleado',  icon: 'bi-person-plus',  v: 'trabajadores' },
-              ].map(a => (
-                <button key={a.v} onClick={() => { setVista(a.v); limpiar(); }} style={{ ...s.btnBlue, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-                  <span><i className={`bi ${a.icon}`} style={{ marginRight: 8 }} />{a.label}</span>
-                  <i className="bi bi-chevron-right" />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── ÁREAS ── */}
-        {vista === 'areas' && (
-          <div>
-            <h2 style={s.pageTitle}>Áreas de Trabajo</h2>
-            <div style={s.card}>
-              <h3 style={s.cardTitle}>Crear área</h3>
-              <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre del área (ej: Empaque, Campo...)" style={s.input}
-                value={fArea.nombre} onChange={e => setFArea({ ...fArea, nombre: e.target.value })} onFocus={limpiar} />
-              <label style={s.fieldLabel}>Pago por hora (MXN)</label>
-              <input type="number" placeholder="Ej: 85.00" style={s.input}
-                value={fArea.pagoPorHora} onChange={e => setFArea({ ...fArea, pagoPorHora: e.target.value })} onFocus={limpiar} />
-              <button onClick={agregarArea} style={s.btnBlue}>Crear Área</button>
-            </div>
-
-            {/* Modal editar área */}
-            {editArea && (
-              <div style={s.overlay} onClick={() => setEditArea(null)}>
-                <div style={s.modalBox} onClick={e => e.stopPropagation()}>
-                  <h3 style={{ color: '#fff', margin: '0 0 16px' }}>Editar Área</h3>
-                  <input placeholder="Nombre" style={s.input} value={editArea.nombre}
-                    onChange={e => setEditArea({ ...editArea, nombre: e.target.value })} />
-                  <label style={s.fieldLabel}>Pago por hora (MXN)</label>
-                  <input type="number" placeholder="Ej: 85.00" style={s.input} value={editArea.pagoPorHora}
-                    onChange={e => setEditArea({ ...editArea, pagoPorHora: e.target.value })} />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <button onClick={guardarEditArea} style={{ ...s.btnBlue, flex: 1 }}>Guardar</button>
-                    <button onClick={() => setEditArea(null)} style={{ ...s.btnLogout, flex: 1, padding: 12, borderRadius: 11, fontSize: 14 }}>Cancelar</button>
-                  </div>
-                  <Ok msg={okMsg} />
-                </div>
-              </div>
-            )}
-
-            <h3 style={s.secLabel}>Áreas registradas ({areas.length})</h3>
-            {areas.map(a => (
-              <div key={a.id} style={s.listItem}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar nombre={a.nombre} color="#10b981" />
-                  <div>
-                    <div style={{ color: '#fff', fontWeight: 500 }}>{a.nombre}</div>
-                    <div style={{ color: '#f59e0b', fontSize: 11 }}>
-                      <i className="bi bi-cash" style={{ marginRight: 4 }} />
-                      ${(a.pagoPorHora || 0).toFixed(2)} / hora
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => setEditArea({ id: a.id, nombre: a.nombre, pagoPorHora: a.pagoPorHora || '' })} style={s.btnEdit}>
-                    <i className="bi bi-pencil" />
-                  </button>
-                  <button onClick={() => eliminarArea(a.id)} style={s.btnDanger}>
-                    <i className="bi bi-trash3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── ENCARGADOS ── */}
-        {vista === 'encargados' && (
-          <div>
-            <h2 style={s.pageTitle}>Encargados</h2>
-            <div style={s.card}>
-              <h3 style={s.cardTitle}>Registrar encargado</h3>
-              <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre" style={s.input} value={fEnc.nombre} onChange={e => setFEnc({ ...fEnc, nombre: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Apellido" style={s.input} value={fEnc.apellido} onChange={e => setFEnc({ ...fEnc, apellido: e.target.value })} onFocus={limpiar} />
-              <input type="email" placeholder="Correo" style={s.input} value={fEnc.email} onChange={e => setFEnc({ ...fEnc, email: e.target.value })} onFocus={limpiar} />
-              <input type="password" placeholder="Contraseña (mín 6)" style={s.input} value={fEnc.pass} onChange={e => setFEnc({ ...fEnc, pass: e.target.value })} onFocus={limpiar} />
-              <select style={s.select} value={fEnc.areaId} onChange={e => setFEnc({ ...fEnc, areaId: e.target.value })} onFocus={limpiar}>
-                <option value="">-- Asignar Área --</option>
-                {areas.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-              </select>
-              <button onClick={agregarEncargado} style={s.btnBlue}>Registrar Encargado</button>
-            </div>
-            <h3 style={s.secLabel}>Encargados registrados ({encargados.length})</h3>
-            {encargados.map(e => (
-              <div key={e.id} style={s.listItem}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar nombre={e.nombre} color="#a78bfa" />
-                  <div>
-                    <div style={{ color: '#fff', fontWeight: 500, fontSize: 14 }}>{e.nombre} {e.apellido}</div>
-                    <div style={{ color: '#6b7280', fontSize: 11 }}>{e.email}</div>
-                    <div style={{ color: '#a78bfa', fontSize: 11 }}><i className="bi bi-diagram-3" style={{ marginRight: 4 }} />{areaNombre(e.areaId)}</div>
-                  </div>
-                </div>
-                <button onClick={() => eliminarEncargado(e.id)} style={s.btnDanger}><i className="bi bi-trash3" /></button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── TRABAJADORES ── */}
-        {vista === 'trabajadores' && (
-          <div>
-            <h2 style={s.pageTitle}>Empleados</h2>
-            <div style={s.card}>
-              <h3 style={s.cardTitle}>Registrar empleado</h3>
-              <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre" style={s.input} value={fTrab.nombre} onChange={e => setFTrab({ ...fTrab, nombre: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Apellido" style={s.input} value={fTrab.apellido} onChange={e => setFTrab({ ...fTrab, apellido: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Teléfono (opcional)" style={s.input} value={fTrab.telefono} onChange={e => setFTrab({ ...fTrab, telefono: e.target.value })} onFocus={limpiar} />
-              <input placeholder="CURP (opcional)" style={s.input} value={fTrab.curp} onChange={e => setFTrab({ ...fTrab, curp: e.target.value })} onFocus={limpiar} />
-              <select style={s.select} value={fTrab.areaId} onChange={e => setFTrab({ ...fTrab, areaId: e.target.value })} onFocus={limpiar}>
-                <option value="">-- Asignar Área --</option>
-                {areas.map(a => <option key={a.id} value={a.id}>{a.nombre} — ${(a.pagoPorHora||0).toFixed(2)}/hr</option>)}
-              </select>
-              <button onClick={agregarTrabajador} style={s.btnBlue}>Registrar Empleado</button>
-            </div>
-            <h3 style={s.secLabel}>Empleados registrados ({trabajadores.length})</h3>
-            {trabajadores.map(t => (
-              <div key={t.id} style={s.listItem}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar nombre={t.nombre} color="#3b82f6" />
-                  <div>
-                    <div style={{ color: '#fff', fontWeight: 500, fontSize: 14 }}>{t.nombre} {t.apellido}</div>
-                    {t.curp && <div style={{ color: '#6b7280', fontSize: 11 }}>CURP: {t.curp}</div>}
-                    <div style={{ color: '#3b82f6', fontSize: 11 }}><i className="bi bi-diagram-3" style={{ marginRight: 4 }} />{areaNombre(t.areaId)}</div>
-                  </div>
-                </div>
-                <button onClick={() => eliminarTrabajador(t.id)} style={s.btnDanger}><i className="bi bi-trash3" /></button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── CALENDARIO ADMIN ── */}
-        {vista === 'calendario' && (
-          <CalendarioAdmin
-            calMes={calMes} setCalMes={setCalMes}
-            calAnio={calAnio} setCalAnio={setCalAnio}
-            diaSelec={diaSelec} setDiaSelec={setDiaSelec}
-            datosDia={datosDia} diasConDatos={diasConDatos}
-            abrirDia={abrirDia}
-          />
-        )}
-
-        {/* ── REPORTE ── */}
-        {vista === 'reporte' && (
-          <div>
-            <h2 style={s.pageTitle}>Reporte Semanal</h2>
-            <div style={s.card}>
-              <h3 style={s.cardTitle}>Rango de fechas</h3>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <label style={{ color: '#9ca3af', fontSize: 11, display: 'block', marginBottom: 4 }}>Desde</label>
-                  <input type="date" style={{ ...s.input, marginBottom: 0 }} value={repInicio} onChange={e => setRepInicio(e.target.value)} />
-                </div>
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <label style={{ color: '#9ca3af', fontSize: 11, display: 'block', marginBottom: 4 }}>Hasta</label>
-                  <input type="date" style={{ ...s.input, marginBottom: 0 }} value={repFin} onChange={e => setRepFin(e.target.value)} />
-                </div>
-              </div>
-              <button onClick={generarReporte} style={{ ...s.btnBlue, opacity: repLoading ? 0.6 : 1 }} disabled={repLoading}>
-                <i className="bi bi-bar-chart-line" style={{ marginRight: 8 }} />
-                {repLoading ? 'Generando...' : 'Generar Reporte'}
-              </button>
-            </div>
-            {repDatos && (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-                  <div style={{ ...s.statCard, padding: 12 }}>
-                    <i className="bi bi-check-circle" style={{ color: '#10b981', fontSize: 20 }} />
-                    <div style={{ color: '#fff', fontSize: 18, fontWeight: 700, margin: '4px 0 0' }}>{repDatos.filas.reduce((a,f)=>a+f.diasPresente,0)}</div>
-                    <div style={{ color: '#6b7280', fontSize: 10 }}>Asistencias</div>
-                  </div>
-                  <div style={{ ...s.statCard, padding: 12 }}>
-                    <i className="bi bi-x-circle" style={{ color: '#ef4444', fontSize: 20 }} />
-                    <div style={{ color: '#fff', fontSize: 18, fontWeight: 700, margin: '4px 0 0' }}>{repDatos.filas.reduce((a,f)=>a+f.diasAusente,0)}</div>
-                    <div style={{ color: '#6b7280', fontSize: 10 }}>Inasistencias</div>
-                  </div>
-                  <div style={{ ...s.statCard, padding: 12 }}>
-                    <i className="bi bi-cash" style={{ color: '#f59e0b', fontSize: 20 }} />
-                    <div style={{ color: '#fff', fontSize: 14, fontWeight: 700, margin: '4px 0 0' }}>
-                      ${repDatos.filas.reduce((a,f)=>a+f.totalPago,0).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0})}
-                    </div>
-                    <div style={{ color: '#6b7280', fontSize: 10 }}>Total MXN</div>
-                  </div>
-                </div>
-                <div style={{ ...s.card, padding: 0, overflow: 'hidden' }}>
-                  <div style={{ padding: '14px 16px', borderBottom: '1px solid #1f2937' }}>
-                    <h3 style={{ color: '#fff', margin: 0, fontSize: 14 }}>Detalle por empleado</h3>
-                    <p style={{ color: '#6b7280', fontSize: 11, margin: '2px 0 0' }}>{repDatos.totalDiasLab} días laborables (lun–sáb)</p>
-                  </div>
-                  {repDatos.filas.map((f, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #1f2937', backgroundColor: i%2===0?'transparent':'rgba(255,255,255,0.01)' }}>
-                      <div style={{ flex: 2, minWidth: 100 }}>
-                        <div style={{ color: '#fff', fontSize: 13, fontWeight: 500 }}>{f.nombre}</div>
-                        <div style={{ color: '#3b82f6', fontSize: 11 }}>{f.area}</div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ color: '#10b981', fontWeight: 700, fontSize: 15 }}>{f.diasPresente}</div>
-                          <div style={{ color: '#6b7280', fontSize: 9 }}>presentes</div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ color: '#ef4444', fontWeight: 700, fontSize: 15 }}>{f.diasAusente}</div>
-                          <div style={{ color: '#6b7280', fontSize: 9 }}>ausentes</div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ color: '#a78bfa', fontWeight: 700, fontSize: 13 }}>{f.totalHoras.toFixed(1)}h</div>
-                          <div style={{ color: '#6b7280', fontSize: 9 }}>horas</div>
-                        </div>
-                        <div style={{ textAlign: 'center', minWidth: 60 }}>
-                          <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 13 }}>
-                            {f.pph > 0 ? `$${f.totalPago.toLocaleString('es-MX',{minimumFractionDigits:0})}` : 'N/A'}
-                          </div>
-                          <div style={{ color: '#6b7280', fontSize: 9 }}>total</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={descargarPDF} style={{ ...s.btnBlue, backgroundColor: '#dc2626', marginTop: 14, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
-                  <i className="bi bi-file-earmark-pdf" /> Descargar PDF
-                </button>
-                <p style={{ color: '#4b5563', fontSize: 11, textAlign: 'center', marginTop: 8 }}>
-                  * Pago calculado con horas reales de entrada/salida × pago/hora del área
-                </p>
-              </>
-            )}
-          </div>
-        )}
-      </main>
-
-      {/* Nav inferior */}
-      <nav style={s.nav}>
-        {[
-          { v: 'dashboard',    icon: 'bi-house-door' },
-          { v: 'areas',        icon: 'bi-diagram-3' },
-          { v: 'encargados',   icon: 'bi-person-badge' },
-          { v: 'trabajadores', icon: 'bi-people' },
-          { v: 'calendario',   icon: 'bi-calendar3' },
-          { v: 'reporte',      icon: 'bi-file-earmark-bar-graph' },
-        ].map(n => (
-          <div key={n.v} style={s.navItem} onClick={() => { setVista(n.v); limpiar(); setRepDatos(null); }}>
-            <i className={`bi ${n.icon}`} style={{ color: vista === n.v ? '#3b82f6' : '#6b7280', fontSize: 20 }} />
-          </div>
-        ))}
-      </nav>
-
-      {modalPersonal && (
-        <div style={s.overlay} onClick={() => setModalPersonal(false)}>
-          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ color: '#fff', margin: 0 }}><i className="bi bi-people" style={{ color: '#3b82f6', marginRight: 8 }} />Empleados ({trabajadores.length})</h3>
-              <button onClick={() => setModalPersonal(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}><i className="bi bi-x-lg" /></button>
-            </div>
-            <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-              {trabajadores.map(t => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #1f2937' }}>
-                  <Avatar nombre={t.nombre} />
-                  <div>
-                    <div style={{ color: '#fff', fontWeight: 500 }}>{t.nombre} {t.apellido}</div>
-                    <div style={{ color: '#3b82f6', fontSize: 11 }}><i className="bi bi-diagram-3" style={{ marginRight: 4 }} />{areaNombre(t.areaId)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PANEL ENCARGADO — Asistencia rápida con buscador, checkbox masivo, edición de hora
-// ═══════════════════════════════════════════════════════════════════════════════
-function EncargadoPanel({ usuario, onLogout }) {
-  const [vista,        setVista]        = useState('lista');
-  const [trabajadores, setTrabajadores] = useState([]);
-  const [area,         setArea]         = useState(null);
-  const [errorMsg,     setErrorMsg]     = useState('');
-  const [okMsg,        setOkMsg]        = useState('');
-
-  // Estado asistencia del día
-  const [registrosHoy, setRegistrosHoy] = useState([]); // [{id, trabajadorId, tipo, fecha, lugar, lat, lng}]
-  const [busqueda,     setBusqueda]     = useState('');
-  const [seleccionados,setSeleccionados]= useState({}); // { trabId: true }
-  const [cargandoGPS,  setCargandoGPS] = useState(false);
-  const [lugarActual,  setLugarActual] = useState('');
-  const [coordsActual, setCoordsActual] = useState(null);
-  const [modalEditHora, setModalEditHora] = useState(null); // { trabId, tipo, isoActual }
-
-  // Calendario
-  const hoy = new Date();
-  const [calMes,       setCalMes]       = useState(hoy.getMonth());
-  const [calAnio,      setCalAnio]      = useState(hoy.getFullYear());
-  const [diaSelec,     setDiaSelec]     = useState(null);
-  const [datosDia,     setDatosDia]     = useState(null);
-  const [diasConDatos, setDiasConDatos] = useState({});
-
-  const limpiar = () => { setErrorMsg(''); setOkMsg(''); };
-
-  const cargarDatos = async () => {
-    const areaObj = await db.areas.get(usuario.areaId);
-    setArea(areaObj);
-    const trabs   = await db.trabajadores.where('areaId').equals(usuario.areaId).toArray();
-    setTrabajadores(trabs);
-    await cargarRegistrosHoy();
-  };
-
-  const cargarRegistrosHoy = async () => {
-    const inicio = new Date(isoHoy() + 'T00:00:00').toISOString();
-    const fin    = new Date(isoHoy() + 'T23:59:59').toISOString();
-    const regs   = (await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray())
-      .filter(r => r.areaId === usuario.areaId);
-    setRegistrosHoy(regs);
-  };
-
-  useEffect(() => { cargarDatos(); }, [vista]);
-
-  useEffect(() => {
-    if (vista !== 'calendario') return;
-    const cargar = async () => {
-      const inicio = new Date(calAnio, calMes, 1).toISOString();
-      const fin    = new Date(calAnio, calMes + 1, 0, 23, 59, 59).toISOString();
-      const regs   = (await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray())
-        .filter(r => r.areaId === usuario.areaId);
-      const mapa = {};
-      regs.forEach(r => { mapa[r.fecha.slice(0,10)] = true; });
-      setDiasConDatos(mapa);
-    };
-    cargar();
-  }, [vista, calMes, calAnio]);
-
-  const abrirDia = async (anio, mes, dia) => {
-    const inicio = new Date(anio, mes, dia, 0,0,0).toISOString();
-    const fin    = new Date(anio, mes, dia, 23,59,59).toISOString();
-    const regs   = (await db.asistencias.where('fecha').between(inicio, fin, true, true).toArray())
-      .filter(r => r.areaId === usuario.areaId);
-    const encsDB = await db.supervisores.where('rol').equals('encargado').toArray();
-    const areasDB= await db.areas.toArray();
-    const enc    = encsDB.find(e => e.areaId === usuario.areaId);
-
-    const porArea = areasDB.filter(a => a.id === usuario.areaId).map(area => {
-      const lugar = regs.find(r => r.lugar && r.lugar !== 'Sin GPS')?.lugar || 'Sin ubicación';
-      const coords = regs.find(r => r.lat);
-      const porTrab = trabajadores.map(t => {
-        const nombre  = `${t.nombre} ${t.apellido}`;
-        const entrada = regs.find(r => r.trabajadorId === nombre && r.tipo === 'entrada');
-        const salida  = regs.find(r => r.trabajadorId === nombre && r.tipo === 'salida');
-        const horas   = horasDiff(entrada?.fecha, salida?.fecha);
-        const ganancia = horas * (area.pagoPorHora || 0);
-        return { nombre, entrada: entrada?.fecha || null, salida: salida?.fecha || null, horas, ganancia, presente: !!entrada };
-      });
-      const totalGanancia = porTrab.reduce((s,t) => s+t.ganancia, 0);
-      return { area, encargado: enc, lugar, coords: coords ? { lat: coords.lat, lng: coords.lng } : null, trabajadores: porTrab, totalGanancia };
-    }).filter(Boolean);
-
-    setDatosDia({ porArea, fecha: { anio, mes, dia } });
-    setDiaSelec({ anio, mes, dia });
-  };
-
-  // Obtener GPS en segundo plano (no bloquea UI)
-  const obtenerGPS = async () => {
-    setCargandoGPS(true);
-    try {
-      const coords = await new Promise((res, rej) =>
-        navigator.geolocation.getCurrentPosition(
-          p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          rej, { timeout: 8000, enableHighAccuracy: true }
-        )
-      );
-      setCoordsActual(coords);
-      let lugar = `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
-      if (navigator.onLine) {
-        try {
-          const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lng}`);
-          const d = await r.json();
-          lugar = d.display_name;
-        } catch {}
-      }
-      setLugarActual(lugar);
-      return { coords, lugar };
-    } catch {
-      setLugarActual('Sin GPS');
-      return { coords: null, lugar: 'Sin GPS' };
-    } finally {
-      setCargandoGPS(false);
-    }
-  };
-
-  // Registrar ENTRADA para los seleccionados
-  const registrarEntrada = async () => {
-    limpiar();
-    const ids = Object.keys(seleccionados).filter(id => seleccionados[id]);
-    if (ids.length === 0) { setErrorMsg('Selecciona al menos un trabajador.'); return; }
-
-    // No esperar GPS para guardar — guardar de inmediato, GPS en fondo
-    const fechaISO = new Date().toISOString();
-    const registros = ids.map(id => {
-      const t = trabajadores.find(x => x.id === Number(id));
-      return {
-        trabajadorId: `${t.nombre} ${t.apellido}`,
-        fecha: fechaISO,
-        tipo: 'entrada',
-        lat: null, lng: null,
-        lugar: lugarActual || 'Obteniendo...',
-        areaId: usuario.areaId,
-        sincronizado: 0,
-      };
-    });
-
-    const newIds = await db.asistencias.bulkAdd(registros, { allKeys: true });
-    setSeleccionados({});
-    setOkMsg(`Entrada registrada para ${ids.length} trabajador(es) ✓`);
-    await cargarRegistrosHoy();
-
-    // GPS en fondo
-    obtenerGPS().then(async ({ coords, lugar }) => {
-      if (!coords) return;
-      await Promise.all(newIds.map(nid => db.asistencias.update(nid, { lat: coords.lat, lng: coords.lng, lugar })));
-      await cargarRegistrosHoy();
-    });
-  };
-
-  // Registrar SALIDA para los seleccionados
-  const registrarSalida = async () => {
-    limpiar();
-    const ids = Object.keys(seleccionados).filter(id => seleccionados[id]);
-    if (ids.length === 0) { setErrorMsg('Selecciona al menos un trabajador.'); return; }
-
-    const fechaISO = new Date().toISOString();
-    const registros = ids.map(id => {
-      const t = trabajadores.find(x => x.id === Number(id));
-      return {
-        trabajadorId: `${t.nombre} ${t.apellido}`,
-        fecha: fechaISO,
-        tipo: 'salida',
-        lat: coordsActual?.lat || null,
-        lng: coordsActual?.lng || null,
-        lugar: lugarActual || 'Sin GPS',
-        areaId: usuario.areaId,
-        sincronizado: 0,
-      };
-    });
-
-    await db.asistencias.bulkAdd(registros);
-    setSeleccionados({});
-    setOkMsg(`Salida registrada para ${ids.length} trabajador(es) ✓`);
-    await cargarRegistrosHoy();
-  };
-
-  // Editar hora de un registro
-  const guardarEdicionHora = async (nuevoISO) => {
-    if (!modalEditHora || !nuevoISO) return;
-    const reg = registrosHoy.find(r =>
-      r.trabajadorId === modalEditHora.nombre &&
-      r.tipo === modalEditHora.tipo &&
-      r.fecha.slice(0, 10) === isoHoy()
+  // 2. Lógica de Filtrado para Salida
+  const obtenerCandidatosSalida = () => {
+    return listaTrabajadores.filter(t => 
+      asistenciasHoy.some(a => a.trabajadorId === t.id && (a.tipo === 'entrada' || a.tipo === 'retardo'))
     );
-    if (reg) {
-      await db.asistencias.update(reg.id, { fecha: nuevoISO });
-      await cargarRegistrosHoy();
-      setOkMsg('Hora actualizada ✓');
-    }
-    setModalEditHora(null);
   };
 
-  // Helpers estado por trabajador
-  const tieneEntrada = tid => {
-    const t = trabajadores.find(x => x.id === tid);
-    if (!t) return null;
-    return registrosHoy.find(r => r.trabajadorId === `${t.nombre} ${t.apellido}` && r.tipo === 'entrada');
-  };
-  const tieneSalida = tid => {
-    const t = trabajadores.find(x => x.id === tid);
-    if (!t) return null;
-    return registrosHoy.find(r => r.trabajadorId === `${t.nombre} ${t.apellido}` && r.tipo === 'salida');
-  };
-  const calcGanancia = tid => {
-    const e = tieneEntrada(tid); const sal = tieneSalida(tid);
-    if (!e || !sal) return null;
-    return (horasDiff(e.fecha, sal.fecha) * (area?.pagoPorHora || 0)).toFixed(2);
-  };
-
-  const filtrados = trabajadores.filter(t =>
-    `${t.nombre} ${t.apellido}`.toLowerCase().includes(busqueda.toLowerCase())
-  );
-  const todosSelec = filtrados.length > 0 && filtrados.every(t => seleccionados[t.id]);
-  const toggleTodos = () => {
-    if (todosSelec) setSeleccionados({});
-    else {
-      const ns = {};
-      filtrados.forEach(t => { ns[t.id] = true; });
-      setSeleccionados(ns);
-    }
-  };
-
-  return (
-    <div style={s.bg}>
-      <header style={s.header}>
-        <div>
-          <h1 style={{ color: '#fff', fontSize: 18, margin: 0, fontWeight: 700 }}>
-            JOB<span style={{ color: '#3b82f6' }}>ASSISTAND</span>
-          </h1>
-          <span style={{ color: '#10b981', fontSize: 11 }}>Encargado · {area?.nombre || '—'}</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ color: '#9ca3af', fontSize: 12 }}>{usuario.nombre}</span>
-          <button onClick={onLogout} style={s.btnLogout}><i className="bi bi-box-arrow-right" /></button>
-        </div>
-      </header>
-
-      <main style={{ padding: '10px 12px 90px' }}>
-
-        {/* ── LISTA / ASISTENCIA ── */}
-        {vista === 'lista' && (
-          <div>
-            <h2 style={s.pageTitle}>Registro de Asistencia</h2>
-
-            {/* Info área + salario */}
-            {area && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 12, padding: '10px 14px', marginBottom: 12 }}>
-                <span style={{ color: '#10b981', fontSize: 13, fontWeight: 600 }}>
-                  <i className="bi bi-diagram-3" style={{ marginRight: 6 }} />{area.nombre}
-                </span>
-                <span style={{ color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>
-                  <i className="bi bi-cash" style={{ marginRight: 4 }} />${(area.pagoPorHora || 0).toFixed(2)}/hr
-                </span>
-              </div>
-            )}
-
-            {/* GPS */}
-            <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button onClick={obtenerGPS} disabled={cargandoGPS}
-                style={{ ...s.btnLogout, fontSize: 12, padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 5, opacity: cargandoGPS ? 0.6 : 1 }}>
-                <i className="bi bi-geo-alt" />{cargandoGPS ? 'Obteniendo GPS...' : 'Capturar Ubicación'}
-              </button>
-              {lugarActual && lugarActual !== 'Sin GPS' && (
-                <span style={{ color: '#10b981', fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <i className="bi bi-geo-alt-fill" style={{ marginRight: 4 }} />{lugarActual.slice(0, 60)}…
-                </span>
-              )}
-            </div>
-
-            <Err msg={errorMsg} /><Ok msg={okMsg} />
-
-            {trabajadores.length === 0 ? (
-              <div style={{ ...s.card, textAlign: 'center', color: '#6b7280' }}>
-                <i className="bi bi-people" style={{ fontSize: 36, marginBottom: 10 }} />
-                <p>No hay empleados en tu área.</p>
-              </div>
-            ) : (
-              <>
-                {/* Buscador */}
-                <div style={{ position: 'relative', marginBottom: 10 }}>
-                  <i className="bi bi-search" style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: '#6b7280', fontSize: 14 }} />
-                  <input
-                    placeholder="Buscar empleado..."
-                    value={busqueda}
-                    onChange={e => setBusqueda(e.target.value)}
-                    style={{ ...s.input, marginBottom: 0, paddingLeft: 36 }}
-                  />
-                </div>
-
-                {/* Seleccionar todos */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ color: '#6b7280', fontSize: 12 }}>{Object.values(seleccionados).filter(Boolean).length} seleccionados</span>
-                  <button onClick={toggleTodos} style={{ background: 'none', border: '1px solid #374151', color: '#9ca3af', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>
-                    {todosSelec ? 'Deseleccionar todos' : 'Seleccionar todos'}
-                  </button>
-                </div>
-
-                {/* Lista trabajadores */}
-                <div style={{ maxHeight: '45vh', overflowY: 'auto', marginBottom: 10 }}>
-                  {filtrados.map(t => {
-                    const entrada  = tieneEntrada(t.id);
-                    const salida   = tieneSalida(t.id);
-                    const ganancia = calcGanancia(t.id);
-                    const nombre   = `${t.nombre} ${t.apellido}`;
-                    return (
-                      <div key={t.id} style={{ ...s.listItem, cursor: 'pointer', flexWrap: 'wrap', gap: 8 }}
-                        onClick={() => setSeleccionados({ ...seleccionados, [t.id]: !seleccionados[t.id] })}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
-                          {/* Checkbox */}
-                          <div style={{
-                            width: 22, height: 22, borderRadius: 6, flexShrink: 0,
-                            backgroundColor: seleccionados[t.id] ? '#10b981' : 'rgba(255,255,255,0.05)',
-                            border: seleccionados[t.id] ? '2px solid #10b981' : '2px solid #374151',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          }}>
-                            {seleccionados[t.id] && <i className="bi bi-check" style={{ color: '#fff', fontSize: 13 }} />}
-                          </div>
-                          <Avatar nombre={t.nombre} color={entrada ? '#10b981' : '#6b7280'} size={32} />
-                          <div>
-                            <div style={{ color: '#fff', fontWeight: 500, fontSize: 14 }}>{nombre}</div>
-                            {/* Horas y ganancia del día */}
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-                              {entrada && (
-                                <span style={{ color: '#10b981', fontSize: 11 }}>
-                                  <i className="bi bi-box-arrow-in-right" style={{ marginRight: 3 }} />
-                                  {hhmm(entrada.fecha)}
-                                  <button onClick={e => { e.stopPropagation(); setModalEditHora({ nombre, tipo: 'entrada', isoActual: entrada.fecha }); }}
-                                    style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 11, padding: '0 2px' }}>✏️</button>
-                                </span>
-                              )}
-                              {salida && (
-                                <span style={{ color: '#3b82f6', fontSize: 11 }}>
-                                  <i className="bi bi-box-arrow-right" style={{ marginRight: 3 }} />
-                                  {hhmm(salida.fecha)}
-                                  <button onClick={e => { e.stopPropagation(); setModalEditHora({ nombre, tipo: 'salida', isoActual: salida.fecha }); }}
-                                    style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 11, padding: '0 2px' }}>✏️</button>
-                                </span>
-                              )}
-                              {ganancia && (
-                                <span style={{ color: '#f59e0b', fontSize: 11 }}>
-                                  <i className="bi bi-cash" style={{ marginRight: 3 }} />${ganancia}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        {/* Estado chip */}
-                        <div onClick={e => e.stopPropagation()} style={{ flexShrink: 0 }}>
-                          {!entrada && <span style={{ background: 'rgba(107,114,128,0.15)', color: '#6b7280', borderRadius: 6, padding: '3px 8px', fontSize: 10 }}>Sin registro</span>}
-                          {entrada && !salida && <span style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', borderRadius: 6, padding: '3px 8px', fontSize: 10 }}>En turno</span>}
-                          {salida && <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', borderRadius: 6, padding: '3px 8px', fontSize: 10 }}>Completado</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Botones de acción */}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button onClick={registrarEntrada} style={{ ...s.btnGreen, flex: 1, fontSize: 13 }}>
-                    <i className="bi bi-box-arrow-in-right" style={{ marginRight: 6 }} />Registrar Entrada
-                  </button>
-                  <button onClick={registrarSalida} style={{ ...s.btnBlue, flex: 1, fontSize: 13 }}>
-                    <i className="bi bi-box-arrow-right" style={{ marginRight: 6 }} />Registrar Salida
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ── CALENDARIO ENCARGADO ── */}
-        {vista === 'calendario' && (
-          <CalendarioAdmin
-            calMes={calMes} setCalMes={setCalMes}
-            calAnio={calAnio} setCalAnio={setCalAnio}
-            diaSelec={diaSelec} setDiaSelec={setDiaSelec}
-            datosDia={datosDia} diasConDatos={diasConDatos}
-            abrirDia={abrirDia}
-          />
-        )}
-      </main>
-
-      {/* Nav inferior */}
-      <nav style={s.nav}>
-        {[{ v: 'lista', icon: 'bi-clipboard-check' }, { v: 'calendario', icon: 'bi-calendar3' }].map(n => (
-          <div key={n.v} style={s.navItem} onClick={() => { setVista(n.v); limpiar(); }}>
-            <i className={`bi ${n.icon}`} style={{ color: vista === n.v ? '#3b82f6' : '#6b7280', fontSize: 22 }} />
-          </div>
-        ))}
-      </nav>
-
-      {/* Modal edición de hora */}
-      {modalEditHora && (
-        <ModalEditHora
-          info={modalEditHora}
-          onGuardar={guardarEdicionHora}
-          onCerrar={() => setModalEditHora(null)}
-        />
-      )}
+  // 3. Componente de Input de Password con Visibilidad
+  const PasswordInput = ({ placeholder, value, onChange, name }) => (
+    <div style={{ position: 'relative', marginBottom: '10px' }}>
+      <input 
+        type={mostrarPass ? "text" : "password"} 
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        style={inputStyle}
+      />
+      <i 
+        className={`bi ${mostrarPass ? 'bi-eye-slash' : 'bi-eye'} position-absolute`}
+        style={{ right: '15px', top: '12px', cursor: 'pointer', color: '#9ca3af' }}
+        onClick={() => setMostrarPass(!mostrarPass)}
+      />
     </div>
   );
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MODAL EDITAR HORA
-// ═══════════════════════════════════════════════════════════════════════════════
-function ModalEditHora({ info, onGuardar, onCerrar }) {
-  const actualHHMM = info.isoActual ? new Date(info.isoActual).toTimeString().slice(0,5) : '';
-  const [hora, setHora] = useState(actualHHMM);
+  // 4. Modal de Asistencia (Lista Emergente)
+  const ModalAsistencia = ({ tipo }) => {
+    const titulo = tipo === 'entrada' ? 'Registrar Entrada' : tipo === 'retardo' ? 'Registrar Retardos' : 'Registrar Salida';
+    const personal = tipo === 'salida' ? obtenerCandidatosSalida() : listaTrabajadores;
 
-  const confirmar = () => {
-    if (!hora) return;
-    const [hh, mm] = hora.split(':');
-    const base = new Date(info.isoActual || new Date());
-    base.setHours(Number(hh), Number(mm), 0, 0);
-    onGuardar(base.toISOString());
+    return (
+      <div style={modalOverlay}>
+        <div style={modalContent}>
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <h3 className="h5 mb-0 text-capitalize">{titulo}</h3>
+            <button className="btn-close btn-close-white" onClick={() => setModalAbierto(null)}></button>
+          </div>
+          
+          <div className="list-group list-group-flush">
+            {personal.map(t => {
+              const registro = asistenciasHoy.find(a => a.trabajadorId === t.id && a.tipo === tipo);
+              const yaEntro = asistenciasHoy.some(a => a.trabajadorId === t.id && a.tipo === 'entrada');
+
+              return (
+                <div key={t.id} className="list-group-item bg-transparent border-secondary d-flex justify-content-between align-items-center px-0">
+                  <div>
+                    <div className="text-white fw-bold">{t.nombre} {t.apellido}</div>
+                    <small className="text-secondary">{t.areaNombre}</small>
+                  </div>
+                  <button 
+                    disabled={registro || (tipo === 'retardo' && yaEntro)}
+                    className={`btn btn-sm ${registro ? 'btn-success' : 'btn-outline-primary'}`}
+                    onClick={() => registrarAccion(t.id, tipo)}
+                  >
+                    {registro ? <i className="bi bi-check-lg"></i> : 'Marcar'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const registrarAccion = async (id, tipo) => {
+    await db.asistencias.add({
+      trabajadorId: id,
+      tipo: tipo,
+      fecha: hoy,
+      hora: new Date().toLocaleTimeString(),
+      sincronizado: 0
+    });
+    // Forzar recarga de datos
+    const a = await db.asistencias.where('fecha').equals(hoy).toArray();
+    setAsistenciasHoy(a);
   };
 
   return (
-    <div style={s.overlay} onClick={onCerrar}>
-      <div style={s.modalBox} onClick={e => e.stopPropagation()}>
-        <h3 style={{ color: '#fff', margin: '0 0 6px' }}>
-          Editar hora de {info.tipo === 'entrada' ? 'entrada' : 'salida'}
-        </h3>
-        <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 16px' }}>{info.nombre}</p>
-        <input type="time" value={hora} onChange={e => setHora(e.target.value)}
-          style={{ ...s.input, fontSize: 24, textAlign: 'center', letterSpacing: 3 }} />
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <button onClick={confirmar} style={{ ...s.btnBlue, flex: 1 }}>Guardar</button>
-          <button onClick={onCerrar} style={{ ...s.btnLogout, flex: 1, padding: 12, borderRadius: 11, fontSize: 14 }}>Cancelar</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CALENDARIO — por área separada
-// ═══════════════════════════════════════════════════════════════════════════════
-function CalendarioAdmin({ calMes, setCalMes, calAnio, setCalAnio, diaSelec, setDiaSelec, datosDia, diasConDatos, abrirDia }) {
-  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  const dias  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const hoy   = new Date();
-  const primerDia = new Date(calAnio, calMes, 1).getDay();
-  const totalDias = new Date(calAnio, calMes + 1, 0).getDate();
-  const celdas    = Array(primerDia).fill(null).concat(Array.from({ length: totalDias }, (_, i) => i + 1));
-  while (celdas.length % 7 !== 0) celdas.push(null);
-
-  return (
-    <div>
-      <h2 style={s.pageTitle}>Calendario</h2>
-
-      {/* Navegación mes */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '10px 16px', border: '1px solid #1f2937' }}>
-        <button onClick={() => { if (calMes === 0) { setCalMes(11); setCalAnio(calAnio - 1); } else setCalMes(calMes - 1); setDiaSelec(null); }}
-          style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}>
-          <i className="bi bi-chevron-left" />
-        </button>
-        <span style={{ color: '#fff', fontWeight: 600, fontSize: 16 }}>{meses[calMes]} {calAnio}</span>
-        <button onClick={() => { if (calMes === 11) { setCalMes(0); setCalAnio(calAnio + 1); } else setCalMes(calMes + 1); setDiaSelec(null); }}
-          style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}>
-          <i className="bi bi-chevron-right" />
-        </button>
+    <div style={{ backgroundColor: '#0B0E14', minHeight: '100vh', color: '#fff' }}>
+      
+      {/* Botones de Acción */}
+      <div className="p-3 d-flex gap-2">
+        <button className="btn btn-primary flex-grow-1" onClick={() => setModalAbierto('entrada')}>Entrada</button>
+        <button className="btn btn-warning flex-grow-1" onClick={() => setModalAbierto('retardo')}>Retardo</button>
+        <button className="btn btn-danger flex-grow-1" onClick={() => setModalAbierto('salida')}>Salida</button>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 12 }}>
-        <button onClick={() => { setCalAnio(calAnio - 1); setDiaSelec(null); }}
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #374151', color: '#9ca3af', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}>
-          {calAnio - 1}
-        </button>
-        <span style={{ color: '#4b5563', fontSize: 12, alignSelf: 'center' }}>{calAnio}</span>
-        <button onClick={() => { setCalAnio(calAnio + 1); setDiaSelec(null); }}
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #374151', color: '#9ca3af', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}>
-          {calAnio + 1}
-        </button>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', marginBottom: 6 }}>
-        {dias.map(d => <div key={d} style={{ textAlign: 'center', color: '#6b7280', fontSize: 11, fontWeight: 600, padding: '4px 0' }}>{d}</div>)}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
-        {celdas.map((dia, i) => {
-          if (!dia) return <div key={`v-${i}`} />;
-          const clave = `${calAnio}-${String(calMes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-          const tiene = diasConDatos[clave];
-          const esHoy = dia === hoy.getDate() && calMes === hoy.getMonth() && calAnio === hoy.getFullYear();
-          const selec = diaSelec && diaSelec.dia === dia && diaSelec.mes === calMes && diaSelec.anio === calAnio;
-          return (
-            <div key={dia} onClick={() => abrirDia(calAnio, calMes, dia)}
-              style={{
-                textAlign: 'center', padding: '10px 0', borderRadius: 10, cursor: 'pointer',
-                backgroundColor: selec ? '#3b82f6' : esHoy ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.02)',
-                border: esHoy && !selec ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
-                color: selec ? '#fff' : '#e5e7eb', fontWeight: esHoy || selec ? '700' : '400', fontSize: 14,
-              }}>
-              {dia}
-              {tiene && <div style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: selec ? '#fff' : '#10b981', margin: '2px auto 0' }} />}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Detalle del día — POR ÁREA SEPARADA */}
-      {diaSelec && datosDia && (
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ color: '#fff', margin: '0 0 12px', fontSize: 15 }}>
-            <i className="bi bi-calendar-event" style={{ color: '#3b82f6', marginRight: 8 }} />
-            {String(diaSelec.dia).padStart(2,'0')}/{String(diaSelec.mes+1).padStart(2,'0')}/{diaSelec.anio}
-          </h4>
-
-          {datosDia.porArea.length === 0 && (
-            <p style={{ color: '#4b5563', textAlign: 'center', fontSize: 13 }}>Sin registros para este día.</p>
-          )}
-
-          {datosDia.porArea.map((bloque, bi) => (
-            <div key={bi} style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid #1f2937', borderRadius: 16, padding: 16, marginBottom: 14 }}>
-              {/* Cabecera área */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div>
-                  <div style={{ color: '#10b981', fontWeight: 700, fontSize: 14 }}>
-                    <i className="bi bi-diagram-3" style={{ marginRight: 6 }} />{bloque.area.nombre}
-                  </div>
-                  {bloque.encargado && (
-                    <div style={{ color: '#a78bfa', fontSize: 12, marginTop: 2 }}>
-                      <i className="bi bi-person-badge" style={{ marginRight: 4 }} />
-                      {bloque.encargado.nombre} {bloque.encargado.apellido}
-                    </div>
-                  )}
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ color: '#f59e0b', fontWeight: 700, fontSize: 15 }}>
-                    ${bloque.totalGanancia.toFixed(2)}
-                  </div>
-                  <div style={{ color: '#6b7280', fontSize: 10 }}>ganancia total</div>
-                </div>
-              </div>
-
-              {/* Ubicación */}
-              {bloque.lugar && bloque.lugar !== 'Sin ubicación' && (
-                <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', backgroundColor: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: 8, padding: '7px 10px', marginBottom: 10 }}>
-                  <i className="bi bi-geo-alt-fill" style={{ color: '#10b981', fontSize: 12, marginTop: 2, flexShrink: 0 }} />
-                  <span style={{ color: '#9ca3af', fontSize: 11, lineHeight: 1.4 }}>{bloque.lugar}</span>
-                </div>
-              )}
-
-              {/* Lista de trabajadores */}
-              {bloque.trabajadores.map((t, ti) => (
-                <div key={ti} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Avatar nombre={t.nombre} color={t.presente ? '#10b981' : '#4b5563'} size={28} />
-                    <div>
-                      <div style={{ color: t.presente ? '#d1d5db' : '#6b7280', fontSize: 13 }}>{t.nombre}</div>
-                      {t.presente && (
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          {t.entrada && <span style={{ color: '#10b981', fontSize: 10 }}>↗ {hhmm(t.entrada)}</span>}
-                          {t.salida  && <span style={{ color: '#3b82f6', fontSize: 10 }}>↙ {hhmm(t.salida)}</span>}
-                          {t.horas > 0 && <span style={{ color: '#a78bfa', fontSize: 10 }}>{t.horas.toFixed(1)}h</span>}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    {t.presente ? (
-                      <>
-                        {t.ganancia > 0 && <div style={{ color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>${t.ganancia.toFixed(2)}</div>}
-                        <div style={{ color: '#10b981', fontSize: 10 }}>✓ presente</div>
-                      </>
-                    ) : (
-                      <div style={{ color: '#ef4444', fontSize: 10 }}>✗ ausente</div>
+      {/* Lista Principal (Lectura) */}
+      <div className="px-3">
+        <h4 className="h6 text-secondary mb-3">Estatus de Hoy ({hoy})</h4>
+        <div className="table-responsive">
+          <table className="table table-dark table-hover border-secondary">
+            <thead>
+              <tr>
+                <th>Personal</th>
+                <th>Estado</th>
+                {esAdmin && <th>Acciones</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {listaTrabajadores.map(t => {
+                const asis = asistenciasHoy.filter(a => a.trabajadorId === t.id);
+                return (
+                  <tr key={t.id}>
+                    <td>{t.nombre}</td>
+                    <td>
+                      {asis.map(a => (
+                        <span key={a.id} className="badge bg-info me-1">{a.tipo}</span>
+                      ))}
+                    </td>
+                    {esAdmin && (
+                      <td>
+                        <button className="btn btn-sm btn-outline-light border-0">
+                          <i className="bi bi-pencil-square"></i>
+                        </button>
+                      </td>
                     )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Renderizado de Modales */}
+      {modalAbierto && <ModalAsistencia tipo={modalAbierto} />}
+
+      {/* Calendario Corregido */}
+      {activeTab === 'calendario' && (
+        <div className="p-3">
+          {/* Aquí mapear registrosCalendario para mostrar puntos en los días correspondientes */}
         </div>
       )}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ESTILOS GLOBALES
-// ═══════════════════════════════════════════════════════════════════════════════
-const s = {
-  bg:        { backgroundColor: '#0B0E14', minHeight: '100vh', fontFamily: 'system-ui,sans-serif', color: '#fff' },
-  loginCard: { backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 24, padding: 28, margin: '60px auto 0', maxWidth: 380, boxShadow: '0 20px 40px rgba(0,0,0,0.4)' },
-  header:    { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid #1f2937', position: 'sticky', top: 0, backgroundColor: '#0B0E14', zIndex: 10 },
-  pageTitle: { color: '#fff', fontSize: 22, margin: '0 0 14px', fontWeight: 700 },
-  card:      { backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 20, padding: 20, marginBottom: 14 },
-  cardTitle: { color: '#fff', fontSize: 15, margin: '0 0 14px', fontWeight: 600 },
-  statCard:  { backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid #1f2937', borderRadius: 18, padding: 14, textAlign: 'center' },
-  listItem:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', backgroundColor: 'rgba(255,255,255,0.02)', marginBottom: 8, borderRadius: 14, border: '1px solid #1f2937' },
-  input:     { width: '100%', padding: '13px 14px', marginBottom: 12, borderRadius: 11, border: '1px solid #374151', backgroundColor: '#111827', color: 'white', boxSizing: 'border-box', fontSize: 14, outline: 'none' },
-  select:    { width: '100%', padding: '13px 14px', marginBottom: 12, borderRadius: 11, border: '1px solid #374151', backgroundColor: '#111827', color: 'white', boxSizing: 'border-box', fontSize: 14, outline: 'none' },
-  fieldLabel:{ color: '#9ca3af', fontSize: 11, display: 'block', marginBottom: 5, fontWeight: 600, letterSpacing: 0.3 },
-  secLabel:  { color: '#9ca3af', fontSize: 12, margin: '16px 0 8px', textTransform: 'uppercase', letterSpacing: 1 },
-  btnBlue:   { width: '100%', padding: '13px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: 11, cursor: 'pointer', fontWeight: 700, fontSize: 14 },
-  btnGreen:  { width: '100%', padding: '13px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: 11, cursor: 'pointer', fontWeight: 700, fontSize: 14 },
-  btnDanger: { background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', flexShrink: 0 },
-  btnEdit:   { background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', color: '#3b82f6', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', flexShrink: 0 },
-  btnLogout: { background: 'rgba(255,255,255,0.06)', border: '1px solid #374151', color: '#9ca3af', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' },
-  nav:       { position: 'fixed', bottom: 0, width: '100%', height: 64, backgroundColor: 'rgba(11,14,20,0.95)', backdropFilter: 'blur(10px)', display: 'flex', borderTop: '1px solid #1f2937', justifyContent: 'space-around', alignItems: 'center', zIndex: 100 },
-  navItem:   { cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 16px' },
-  errBanner: { backgroundColor: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', borderRadius: 10, padding: '11px 14px', marginBottom: 13, fontSize: 13, display: 'flex', alignItems: 'center' },
-  okBanner:  { backgroundColor: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#6ee7b7', borderRadius: 10, padding: '11px 14px', marginBottom: 13, fontSize: 13, display: 'flex', alignItems: 'center' },
-  overlay:   { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' },
-  modalBox:  { backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '22px 22px 0 0', padding: 22, width: '100%', maxWidth: 500 },
-};
+export default Jobassistand;
