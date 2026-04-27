@@ -19,6 +19,16 @@ const validarRegistro = ({ nombre, apellido, email, pass, confirm }) => {
   return null;
 };
 
+const validarTelefono = (tel) => {
+  if (!tel) return true; // opcional
+  return /^\d{10}$/.test(tel);
+};
+const validarCURP = (curp) => {
+  if (!curp) return true; // opcional
+  const regex = /^[A-Z]{4}\d{6}[A-Z]{6}\d{2}$/;
+  return regex.test(curp.toUpperCase());
+};
+
 // ─── Helpers tiempo ───────────────────────────────────────────────────────────
 const hhmm = iso => {
   if (!iso) return '--:--';
@@ -308,12 +318,20 @@ function AdminPanel({ usuario, onLogout }) {
     recargar();
   };
 
-  // ── TRABAJADOR ────────────────────────────────────────────────────────────
+  // ── TRABAJADOR con validaciones de teléfono y CURP ─────────────────────────
   const agregarTrabajador = async () => {
     limpiar();
     if (!fTrab.nombre.trim())   { setErrorMsg('Nombre obligatorio.'); return; }
     if (!fTrab.apellido.trim()) { setErrorMsg('Apellido obligatorio.'); return; }
     if (!fTrab.areaId)          { setErrorMsg('Asigna un área.'); return; }
+    if (fTrab.telefono && !validarTelefono(fTrab.telefono)) {
+      setErrorMsg('El teléfono debe contener exactamente 10 dígitos numéricos.');
+      return;
+    }
+    if (fTrab.curp && !validarCURP(fTrab.curp)) {
+      setErrorMsg('El formato de CURP no es válido (debe tener 18 caracteres alfanuméricos, ej: GODE561231HDFR).');
+      return;
+    }
     await db.trabajadores.add({
       nombre: fTrab.nombre.trim(), apellido: fTrab.apellido.trim(),
       telefono: fTrab.telefono.trim(), curp: fTrab.curp.trim().toUpperCase(),
@@ -569,8 +587,8 @@ function AdminPanel({ usuario, onLogout }) {
               <Err msg={errorMsg} /><Ok msg={okMsg} />
               <input placeholder="Nombre" style={s.input} value={fTrab.nombre} onChange={e => setFTrab({ ...fTrab, nombre: e.target.value })} onFocus={limpiar} />
               <input placeholder="Apellido" style={s.input} value={fTrab.apellido} onChange={e => setFTrab({ ...fTrab, apellido: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Teléfono (opcional)" style={s.input} value={fTrab.telefono} onChange={e => setFTrab({ ...fTrab, telefono: e.target.value })} onFocus={limpiar} />
-              <input placeholder="CURP (opcional)" style={s.input} value={fTrab.curp} onChange={e => setFTrab({ ...fTrab, curp: e.target.value })} onFocus={limpiar} />
+              <input placeholder="Teléfono (10 dígitos)" style={s.input} value={fTrab.telefono} onChange={e => setFTrab({ ...fTrab, telefono: e.target.value })} onFocus={limpiar} />
+              <input placeholder="CURP (opcional)" style={s.input} value={fTrab.curp} onChange={e => setFTrab({ ...fTrab, curp: e.target.value.toUpperCase() })} onFocus={limpiar} />
               <select style={s.select} value={fTrab.areaId} onChange={e => setFTrab({ ...fTrab, areaId: e.target.value })} onFocus={limpiar}>
                 <option value="">-- Asignar Área --</option>
                 {areas.map(a => <option key={a.id} value={a.id}>{a.nombre} — ${(a.pagoPorHora||0).toFixed(2)}/hr</option>)}
@@ -584,6 +602,7 @@ function AdminPanel({ usuario, onLogout }) {
                   <Avatar nombre={t.nombre} color="#3b82f6" />
                   <div>
                     <div style={{ color: '#fff', fontWeight: 500, fontSize: 14 }}>{t.nombre} {t.apellido}</div>
+                    {t.telefono && <div style={{ color: '#6b7280', fontSize: 11 }}>📞 {t.telefono}</div>}
                     {t.curp && <div style={{ color: '#6b7280', fontSize: 11 }}>CURP: {t.curp}</div>}
                     <div style={{ color: '#3b82f6', fontSize: 11 }}><i className="bi bi-diagram-3" style={{ marginRight: 4 }} />{areaNombre(t.areaId)}</div>
                   </div>
