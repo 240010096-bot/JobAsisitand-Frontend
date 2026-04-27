@@ -513,6 +513,35 @@ function AdminPanel({ usuario, onLogout }) {
     } finally { setRepLoading(false); }
   };
 
+
+
+const registrarAsistencia = async (datos) => {
+  // 1. Guardamos localmente (Dexie)
+  await db.asistencias.add(datos);
+
+  // 2. ENVIAMOS AL SERVIDOR (Aquí está el secreto)
+  try {
+    const response = await fetch('https://jobasisitand-backend.onrender.com/api/asistencias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(datos) // Enviamos los datos al servidor
+    });
+
+    if (!response.ok) throw new Error('Error al sincronizar con el servidor');
+    
+    console.log('Asistencia sincronizada con la nube correctamente');
+  } catch (error) {
+    console.error('No se pudo enviar al servidor, quedará pendiente:', error);
+  }
+};
+
+
+
+
+  
+
+
+  
   const descargarPDF = () => {
     if (!repDatos) return;
     if (!window.jspdf) { alert('jsPDF no cargado.'); return; }
