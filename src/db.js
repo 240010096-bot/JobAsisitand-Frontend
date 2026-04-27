@@ -2,7 +2,6 @@ import Dexie from 'dexie';
 
 export const db = new Dexie('AgroAsistenciaDB');
 
-// Versión 24: relación supervisor_areas (muchos a muchos)
 db.version(24).stores({
   supervisores:    '++id, email, password, nombre, apellido, rol',
   areas:           '++id, nombre, pagoPorHora',
@@ -11,7 +10,6 @@ db.version(24).stores({
   supervisor_areas:'++id, supervisorId, areaId',
 });
 
-// Migración automática desde versión anterior (si existía campo areaId en supervisores)
 db.open().then(async () => {
   try {
     const count = await db.supervisor_areas.count();
