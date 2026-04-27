@@ -394,25 +394,57 @@ function AdminPanel({ usuario, onLogout }) {
 
   // ── ENCARGADO (registro independiente) ──────────────────────────────────────
   const agregarEncargado = async () => {
-    limpiar();
-    if (!fEnc.nombre.trim())          { setErrorMsg('Nombre obligatorio.'); return; }
-    if (!fEnc.apellido.trim())        { setErrorMsg('Apellido obligatorio.'); return; }
-    if (!fEnc.email.trim())           { setErrorMsg('Correo obligatorio.'); return; }
-    if (!validarEmail(fEnc.email))    { setErrorMsg('Correo no válido.'); return; }
-    if (!fEnc.pass || fEnc.pass.length < 6) { setErrorMsg('Contraseña mínimo 6 caracteres.'); return; }
-    if (fEnc.pass !== fEnc.confirm)   { setErrorMsg('Las contraseñas no coinciden.'); return; }
-    const existe = await db.supervisores.where('email').equalsIgnoreCase(fEnc.email.trim()).first();
-    if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
-    await db.supervisores.add({
-      nombre: fEnc.nombre.trim(), apellido: fEnc.apellido.trim(),
-      email: fEnc.email.trim().toLowerCase(), password: fEnc.pass,
-      rol: 'encargado',
-    });
-    setFEnc({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
-    setOkMsg('Encargado registrado. Ahora puedes asignarle áreas desde el módulo de áreas.');
-    recargar();
+  limpiar();
+
+  // 1. Validaciones existentes
+  if (!fEnc.nombre.trim())            { setErrorMsg('Nombre obligatorio.'); return; }
+  if (!fEnc.apellido.trim())          { setErrorMsg('Apellido obligatorio.'); return; }
+  if (!fEnc.email.trim())             { setErrorMsg('Correo obligatorio.'); return; }
+  if (!validarEmail(fEnc.email))      { setErrorMsg('Correo no válido.'); return; }
+  if (!fEnc.pass || fEnc.pass.length < 6) { setErrorMsg('Contraseña mínimo 6 caracteres.'); return; }
+  if (fEnc.pass !== fEnc.confirm)     { setErrorMsg('Las contraseñas no coinciden.'); return; }
+
+  const existe = await db.supervisores.where('email').equalsIgnoreCase(fEnc.email.trim()).first();
+  if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
+
+  // 2. Preparar el objeto a enviar
+  const nuevoSupervisor = {
+    nombre: fEnc.nombre.trim(),
+    apellido: fEnc.apellido.trim(),
+    email: fEnc.email.trim().toLowerCase(),
+    password: fEnc.pass,
+    rol: 'encargado'
   };
 
+  try {
+    // 3. Enviar a MongoDB a través de tu API en Render
+    const response = await fetch('https://jobasisitand-backend.onrender.com/api/supervisores', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify(nuevoSupervisor)
+    });
+
+    // Validar si el servidor respondió con error
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Error al conectar con el servidor');
+    }
+
+    // 4. Si el servidor respondió OK, guardamos en Dexie
+    await db.supervisores.add(nuevoSupervisor);
+
+    // 5. Limpiar y éxito
+    setFEnc({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
+    setOkMsg('Encargado registrado en la nube y localmente.');
+    recargar();
+
+  } catch (error) {
+    console.error('Error:', error);
+    setErrorMsg('Error al guardar: ' + error.message);
+  }
+};
   // ── TRABAJADOR ────────────────────────────────────────────────────────────
   const agregarTrabajador = async () => {
     limpiar();
