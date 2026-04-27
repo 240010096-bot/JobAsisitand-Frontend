@@ -142,20 +142,20 @@ export default function Jobassistand() {
         <Err msg={errorMsg} /><Ok msg={okMsg} />
         {modo === 'register' && (
           <>
-            <input placeholder="Nombre" style={s.input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} onFocus={limpiar} />
-            <input placeholder="Apellido" style={s.input} value={form.apellido} onChange={e => setForm({ ...form, apellido: e.target.value })} onFocus={limpiar} />
+            <input placeholder="Nombre" maxLength={50} style={s.input} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} onFocus={limpiar} />
+            <input placeholder="Apellido" maxLength={50} style={s.input} value={form.apellido} onChange={e => setForm({ ...form, apellido: e.target.value })} onFocus={limpiar} />
           </>
         )}
-        <input type="email" placeholder="Correo electrónico" style={s.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} onFocus={limpiar} />
+        <input type="email" placeholder="Correo electrónico" maxLength={100} style={s.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} onFocus={limpiar} />
         <div style={{ position: 'relative' }}>
-          <input type={showPass ? 'text' : 'password'} placeholder="Contraseña" style={s.input} value={form.pass} onChange={e => setForm({ ...form, pass: e.target.value })} onFocus={limpiar}
+          <input type={showPass ? 'text' : 'password'} placeholder="Contraseña" maxLength={50} style={s.input} value={form.pass} onChange={e => setForm({ ...form, pass: e.target.value })} onFocus={limpiar}
             onKeyDown={e => e.key === 'Enter' && modo === 'login' && handleLogin()} />
           <i className={`bi bi-eye${showPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }} onClick={() => setShowPass(!showPass)} />
         </div>
         {modo === 'register' && (
           <>
             <div style={{ position: 'relative' }}>
-              <input type={showPass ? 'text' : 'password'} placeholder="Confirmar contraseña" style={s.input} value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} onFocus={limpiar} />
+              <input type={showPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input} value={form.confirm} onChange={e => setForm({ ...form, confirm: e.target.value })} onFocus={limpiar} />
               <i className={`bi bi-eye${showPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }} onClick={() => setShowPass(!showPass)} />
             </div>
           </>
@@ -484,10 +484,10 @@ function AdminPanel({ usuario, onLogout }) {
             <div style={s.card}>
               <h3 style={s.cardTitle}>Crear área</h3>
               <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre del área (ej: Empaque, Campo...)" style={s.input}
+              <input placeholder="Nombre del área (ej: Empaque, Campo...)" maxLength={100} style={s.input}
                 value={fArea.nombre} onChange={e => setFArea({ ...fArea, nombre: e.target.value })} onFocus={limpiar} />
               <label style={s.fieldLabel}>Pago por hora (MXN)</label>
-              <input type="number" placeholder="Ej: 85.00" style={s.input}
+              <input type="number" step="0.01" min="0" max="999999.99" placeholder="Ej: 85.00" style={s.input}
                 value={fArea.pagoPorHora} onChange={e => setFArea({ ...fArea, pagoPorHora: e.target.value })} onFocus={limpiar} />
               <button onClick={agregarArea} style={s.btnBlue}>Crear Área</button>
             </div>
@@ -497,10 +497,10 @@ function AdminPanel({ usuario, onLogout }) {
               <div style={s.overlay} onClick={() => setEditArea(null)}>
                 <div style={s.modalBox} onClick={e => e.stopPropagation()}>
                   <h3 style={{ color: '#fff', margin: '0 0 16px' }}>Editar Área</h3>
-                  <input placeholder="Nombre" style={s.input} value={editArea.nombre}
+                  <input placeholder="Nombre" maxLength={100} style={s.input} value={editArea.nombre}
                     onChange={e => setEditArea({ ...editArea, nombre: e.target.value })} />
                   <label style={s.fieldLabel}>Pago por hora (MXN)</label>
-                  <input type="number" placeholder="Ej: 85.00" style={s.input} value={editArea.pagoPorHora}
+                  <input type="number" step="0.01" min="0" max="999999.99" style={s.input} value={editArea.pagoPorHora}
                     onChange={e => setEditArea({ ...editArea, pagoPorHora: e.target.value })} />
                   <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                     <button onClick={guardarEditArea} style={{ ...s.btnBlue, flex: 1 }}>Guardar</button>
@@ -544,15 +544,15 @@ function AdminPanel({ usuario, onLogout }) {
             <div style={s.card}>
               <h3 style={s.cardTitle}>Registrar encargado</h3>
               <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre" style={s.input} value={fEnc.nombre} onChange={e => setFEnc({ ...fEnc, nombre: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Apellido" style={s.input} value={fEnc.apellido} onChange={e => setFEnc({ ...fEnc, apellido: e.target.value })} onFocus={limpiar} />
-              <input type="email" placeholder="Correo" style={s.input} value={fEnc.email} onChange={e => setFEnc({ ...fEnc, email: e.target.value })} onFocus={limpiar} />
+              <input placeholder="Nombre" maxLength={50} style={s.input} value={fEnc.nombre} onChange={e => setFEnc({ ...fEnc, nombre: e.target.value })} onFocus={limpiar} />
+              <input placeholder="Apellido" maxLength={50} style={s.input} value={fEnc.apellido} onChange={e => setFEnc({ ...fEnc, apellido: e.target.value })} onFocus={limpiar} />
+              <input type="email" placeholder="Correo" maxLength={100} style={s.input} value={fEnc.email} onChange={e => setFEnc({ ...fEnc, email: e.target.value })} onFocus={limpiar} />
               <div style={{ position: 'relative' }}>
-                <input type={showEncPass ? 'text' : 'password'} placeholder="Contraseña (mín 6)" style={s.input} value={fEnc.pass} onChange={e => setFEnc({ ...fEnc, pass: e.target.value })} onFocus={limpiar} />
+                <input type={showEncPass ? 'text' : 'password'} placeholder="Contraseña (mín 6)" maxLength={50} style={s.input} value={fEnc.pass} onChange={e => setFEnc({ ...fEnc, pass: e.target.value })} onFocus={limpiar} />
                 <i className={`bi bi-eye${showEncPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }} onClick={() => setShowEncPass(!showEncPass)} />
               </div>
               <div style={{ position: 'relative' }}>
-                <input type={showEncPass ? 'text' : 'password'} placeholder="Confirmar contraseña" style={s.input} value={fEnc.confirm} onChange={e => setFEnc({ ...fEnc, confirm: e.target.value })} onFocus={limpiar} />
+                <input type={showEncPass ? 'text' : 'password'} placeholder="Confirmar contraseña" maxLength={50} style={s.input} value={fEnc.confirm} onChange={e => setFEnc({ ...fEnc, confirm: e.target.value })} onFocus={limpiar} />
                 <i className={`bi bi-eye${showEncPass ? '-slash' : ''}`} style={{ position: 'absolute', right: 12, top: 14, cursor: 'pointer', color: '#9ca3af' }} onClick={() => setShowEncPass(!showEncPass)} />
               </div>
               <select style={s.select} value={fEnc.areaId} onChange={e => setFEnc({ ...fEnc, areaId: e.target.value })} onFocus={limpiar}>
@@ -585,10 +585,10 @@ function AdminPanel({ usuario, onLogout }) {
             <div style={s.card}>
               <h3 style={s.cardTitle}>Registrar empleado</h3>
               <Err msg={errorMsg} /><Ok msg={okMsg} />
-              <input placeholder="Nombre" style={s.input} value={fTrab.nombre} onChange={e => setFTrab({ ...fTrab, nombre: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Apellido" style={s.input} value={fTrab.apellido} onChange={e => setFTrab({ ...fTrab, apellido: e.target.value })} onFocus={limpiar} />
-              <input placeholder="Teléfono (10 dígitos)" style={s.input} value={fTrab.telefono} onChange={e => setFTrab({ ...fTrab, telefono: e.target.value })} onFocus={limpiar} />
-              <input placeholder="CURP (opcional)" style={s.input} value={fTrab.curp} onChange={e => setFTrab({ ...fTrab, curp: e.target.value.toUpperCase() })} onFocus={limpiar} />
+              <input placeholder="Nombre" maxLength={50} style={s.input} value={fTrab.nombre} onChange={e => setFTrab({ ...fTrab, nombre: e.target.value })} onFocus={limpiar} />
+              <input placeholder="Apellido" maxLength={50} style={s.input} value={fTrab.apellido} onChange={e => setFTrab({ ...fTrab, apellido: e.target.value })} onFocus={limpiar} />
+              <input placeholder="Teléfono (10 dígitos)" maxLength={10} style={s.input} value={fTrab.telefono} onChange={e => setFTrab({ ...fTrab, telefono: e.target.value })} onFocus={limpiar} />
+              <input placeholder="CURP (opcional)" maxLength={18} style={s.input} value={fTrab.curp} onChange={e => setFTrab({ ...fTrab, curp: e.target.value.toUpperCase() })} onFocus={limpiar} />
               <select style={s.select} value={fTrab.areaId} onChange={e => setFTrab({ ...fTrab, areaId: e.target.value })} onFocus={limpiar}>
                 <option value="">-- Asignar Área --</option>
                 {areas.map(a => <option key={a.id} value={a.id}>{a.nombre} — ${(a.pagoPorHora||0).toFixed(2)}/hr</option>)}
