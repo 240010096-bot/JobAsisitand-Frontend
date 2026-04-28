@@ -144,9 +144,8 @@ export default function Jobassistand() {
 
 
   //////////////////////////////////
-
- const handleLogin = async (email, password) => {
-  // 1. Validaciones preventivas (Evita que el código intente buscar "undefined")
+const handleLogin = async (email, password) => {
+  // 1. Validaciones preventivas
   if (!email || email.trim() === "" || !password || password.trim() === "") {
     setErrorMsg("Por favor, ingresa correo y contraseña.");
     return;
@@ -154,13 +153,10 @@ export default function Jobassistand() {
 
   try {
     // 2. Búsqueda local en IndexedDB (Dexie)
-    // El .trim() limpia espacios accidentales
     let usuario = await db.supervisores.where('email').equals(email.trim()).first();
 
     // 3. Si no está en local, intentamos buscar en la Nube (API)
     if (!usuario) {
-      console.log("Usuario no encontrado localmente, buscando en la nube...");
-      
       const res = await fetch('https://jobasisitand-backend.onrender.com/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -170,21 +166,21 @@ export default function Jobassistand() {
       if (res.ok) {
         const data = await res.json();
         usuario = data.usuario;
-
-        // ¡IMPORTANTE! Guardamos en IndexedDB para futuras sesiones offline
         await db.supervisores.add(usuario);
-        console.log("Usuario descargado y guardado localmente.");
       } else {
-        setErrorMsg("Credenciales incorrectas o usuario no encontrado.");
+        setErrorMsg("Credenciales incorrectas.");
         return;
       }
     }
 
     // 4. Verificación final de contraseña
     if (usuario.password === password.trim()) {
-      // Éxito: Guardamos en sesión o redirigimos
       console.log("Login exitoso:", usuario);
-      iniciarSesionApp(usuario); // Asegúrate de tener tu función de inicio de sesión
+      
+      // CAMBIO AQUÍ: Usa setUsuario (o como se llame tu estado de sesión)
+      // Esto reemplaza al error "iniciarSesionApp is not defined"
+      setUsuario(usuario); 
+      
     } else {
       setErrorMsg("Contraseña incorrecta.");
     }
