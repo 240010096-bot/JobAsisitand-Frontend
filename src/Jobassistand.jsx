@@ -2,20 +2,37 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './db';
 
 // ─── Validaciones ─────────────────────────────────────────────────────────────
-const validarEmail  = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
-const validarLogin  = ({ email, pass }) => {
-  if (!email.trim())        return 'El correo es obligatorio.';
-  if (!validarEmail(email)) return 'Correo no válido.';
-  if (!pass)                return 'La contraseña es obligatoria.';
+// ─── Validaciones Corregidas ──────────────────────────────────────────────────
+
+// Convertimos a string y aseguramos que no sea undefined antes de hacer trim()
+const validarEmail = (e) => {
+  const valor = e ? String(e) : ''; 
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim());
+};
+
+const validarLogin = ({ email, pass }) => {
+  const e = email ? String(email) : '';
+  const p = pass ? String(pass) : '';
+  
+  if (!e.trim()) return 'El correo es obligatorio.';
+  if (!validarEmail(e)) return 'Correo no válido.';
+  if (!p.trim()) return 'La contraseña es obligatoria.';
   return null;
 };
+
 const validarRegistro = ({ nombre, apellido, email, pass, confirm }) => {
-  if (!nombre.trim())           return 'El nombre es obligatorio.';
-  if (!apellido.trim())         return 'El apellido es obligatorio.';
-  if (!email.trim())            return 'El correo es obligatorio.';
-  if (!validarEmail(email))     return 'Correo no válido.';
-  if (!pass || pass.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
-  if (pass !== confirm)         return 'Las contraseñas no coinciden.';
+  const n = nombre ? String(nombre) : '';
+  const a = apellido ? String(apellido) : '';
+  const e = email ? String(email) : '';
+  const p = pass ? String(pass) : '';
+  const c = confirm ? String(confirm) : '';
+
+  if (!n.trim()) return 'El nombre es obligatorio.';
+  if (!a.trim()) return 'El apellido es obligatorio.';
+  if (!e.trim()) return 'El correo es obligatorio.';
+  if (!validarEmail(e)) return 'Correo no válido.';
+  if (!p || p.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+  if (p !== c) return 'Las contraseñas no coinciden.';
   return null;
 };
 
