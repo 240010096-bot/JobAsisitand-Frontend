@@ -192,21 +192,51 @@ const handleLogin = async (email, password) => {
 };
   //////////////////////
 
-  
-  const handleRegistro = async () => {
-    limpiar();
-    const err = validarRegistro(form);
-    if (err) { setErrorMsg(err); return; }
-    const existe = await db.supervisores.where('email').equalsIgnoreCase(form.email.trim()).first();
-    if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
+ const handleRegistro = async () => {
+  limpiar();
+  const err = validarRegistro(form);
+  if (err) { setErrorMsg(err); return; }
+
+  try {
+    // 1. Primero, intentamos enviar los datos al Servidor (API)
+    const response = await fetch('https://jobasisitand-backend.onrender.com/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nombre: form.nombre.trim(),
+        apellido: form.apellido.trim(),
+        email: form.email.trim().toLowerCase(),
+        password: form.pass, 
+        rol: 'admin'
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      // Si el servidor falla, lanzamos el error para que caiga en el bloque 'catch'
+      throw new Error(data.message || 'Error al registrar en el servidor');
+    }
+
+    // 2. Si el servidor respondió OK, guardamos localmente también
     await db.supervisores.add({
-      nombre: form.nombre.trim(), apellido: form.apellido.trim(),
-      email: form.email.trim().toLowerCase(), password: form.pass,
+      nombre: form.nombre.trim(),
+      apellido: form.apellido.trim(),
+      email: form.email.trim().toLowerCase(),
+      password: form.pass,
       rol: 'admin',
     });
+
+    // 3. Éxito: avisamos al usuario y volvemos al login
     setOkMsg('Cuenta creada. Ahora puedes ingresar.');
     cambiarModo('login');
-  };
+
+  } catch (error) {
+    console.error("Error al registrar:", error);
+    // Mostramos el error en la interfaz
+    setErrorMsg(error.message || 'Error al conectar con el servidor.');
+  }
+};
 
   const cerrarSesion = () => {
     localStorage.removeItem('session_usuario');
