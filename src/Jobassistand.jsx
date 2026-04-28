@@ -120,41 +120,55 @@ export default function Jobassistand() {
   //////////////////////////////////
 
   
- const handleLogin = async (email, password) => {
-  // 1. Intentar buscar en IndexedDB (Local)
-  let usuario = await db.supervisores.where('email').equals(email).first();
+const handleLogin = async (email, password) => {
+  // 1. Validaciones preventivas (Evita que el código intente buscar "undefined")
+  if (!email || email.trim() === "" || !password || password.trim() === "") {
+    setErrorMsg("Por favor, ingresa correo y contraseña.");
+    return;
+  }
 
-  // 2. Si no está en local, buscar en el Backend (MongoDB)
-  if (!usuario) {
-    try {
-      const response = await fetch('https://tu-backend.onrender.com/api/login', {
+  try {
+    // 2. Búsqueda local en IndexedDB (Dexie)
+    // El .trim() limpia espacios accidentales
+    let usuario = await db.supervisores.where('email').equals(email.trim()).first();
+
+    // 3. Si no está en local, intentamos buscar en la Nube (API)
+    if (!usuario) {
+      console.log("Usuario no encontrado localmente, buscando en la nube...");
+      
+      const res = await fetch('https://jobasisitand-backend.onrender.com/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: email.trim(), password: password.trim() })
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (res.ok) {
+        const data = await res.json();
         usuario = data.usuario;
 
-        // ¡IMPORTANTE! Guardar en IndexedDB para que funcione offline después
-        await db.supervisores.add(usuario); 
+        // ¡IMPORTANTE! Guardamos en IndexedDB para futuras sesiones offline
+        await db.supervisores.add(usuario);
+        console.log("Usuario descargado y guardado localmente.");
+      } else {
+        setErrorMsg("Credenciales incorrectas o usuario no encontrado.");
+        return;
       }
-    } catch (err) {
-      console.error("Error conectando a la nube:", err);
-      // Aquí puedes mostrar un mensaje: "No hay internet y el usuario no está guardado localmente"
     }
-  }
 
-  // 3. Validar finalmente
-  if (usuario && usuario.password === password) {
-    // Procede a entrar a la aplicación
-    iniciarSesion(usuario);
-  } else {
-    setError("Usuario no encontrado o contraseña incorrecta.");
+    // 4. Verificación final de contraseña
+    if (usuario.password === password.trim()) {
+      // Éxito: Guardamos en sesión o redirigimos
+      console.log("Login exitoso:", usuario);
+      iniciarSesionApp(usuario); // Asegúrate de tener tu función de inicio de sesión
+    } else {
+      setErrorMsg("Contraseña incorrecta.");
+    }
+
+  } catch (err) {
+    console.error("Error crítico en login:", err);
+    setErrorMsg("Error al conectar: " + err.message);
   }
 };
-
 
   //////////////////////
 
