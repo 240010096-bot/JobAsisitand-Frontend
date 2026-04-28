@@ -259,10 +259,17 @@ export default function Jobassistand() {
             </div>
           </>
         )}
-        <button onClick={() => { if (modo === 'login') { handleLogin(email, password);
-    } else { handleRegistro()} }} style={s.btnBlue}>
-          {modo === 'login' ? 'Ingresar' : 'Crear Cuenta Admin'}
-        </button>
+      <button onClick={() => { 
+    if (modo === 'login') { 
+        // Usamos form.email y form.pass en lugar de variables que no existen
+        handleLogin(form.email, form.pass); 
+    } else { 
+        // Pasamos el objeto form completo para el registro
+        handleRegistro(form); 
+    } 
+}} style={s.btnBlue}>
+    {modo === 'login' ? 'Ingresar' : 'Crear Cuenta Admin'}
+</button>
         {modo === 'register' && (
           <p style={{ color: '#4b5563', fontSize: 11, textAlign: 'center', marginTop: 12 }}>Las cuentas creadas aquí son de administrador.</p>
         )}
