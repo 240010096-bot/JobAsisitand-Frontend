@@ -446,7 +446,7 @@ const crearAreaConEncargados = async () => {
     
     // Si es nuevo, intentamos crear en la nube primero
     try {
-      const resEnc = await fetch('https://jobasisitand-backend.onrender.com/api/supervisor', {
+      const resEnc = await fetch('https://jobasisitand-backend.onrender.com/api/supervisores', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
