@@ -407,7 +407,10 @@ function AdminPanel({ usuario, onLogout }) {
   const existe = await db.supervisores.where('email').equalsIgnoreCase(fEnc.email.trim()).first();
   if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
 
-  // 2. Preparar el objeto a enviar
+ const agregarEncargado = async () => {
+  limpiar();
+  // ... (tus validaciones previas aquí) ...
+
   const nuevoSupervisor = {
     nombre: fEnc.nombre.trim(),
     apellido: fEnc.apellido.trim(),
@@ -417,32 +420,23 @@ function AdminPanel({ usuario, onLogout }) {
   };
 
   try {
-    // 3. Enviar a MongoDB a través de tu API en Render
-    const response = await fetch('https://jobasisitand-backend.onrender.com/api/supervisores', {
+    // 1. Intentar guardar en la Nube
+    const res = await fetch('https://jobasisitand-backend.onrender.com/api/supervisores', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json' 
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(nuevoSupervisor)
     });
 
-    // Validar si el servidor respondió con error
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Error al conectar con el servidor');
-    }
+    if (!res.ok) throw new Error('No se pudo guardar en la nube');
 
-    // 4. Si el servidor respondió OK, guardamos en Dexie
+    // 2. Solo si tuvo éxito, guardamos localmente
     await db.supervisores.add(nuevoSupervisor);
-
-    // 5. Limpiar y éxito
+    
     setFEnc({ nombre: '', apellido: '', email: '', pass: '', confirm: '' });
-    setOkMsg('Encargado registrado en la nube y localmente.');
+    setOkMsg('Guardado en la nube y localmente.');
     recargar();
-
-  } catch (error) {
-    console.error('Error:', error);
-    setErrorMsg('Error al guardar: ' + error.message);
+  } catch (err) {
+    setErrorMsg('Error de conexión con el servidor: ' + err.message);
   }
 };
   // ── TRABAJADOR ────────────────────────────────────────────────────────────
@@ -459,16 +453,40 @@ function AdminPanel({ usuario, onLogout }) {
       setErrorMsg('El formato de CURP no es válido (18 caracteres, ej: GODE561231HDFR).');
       return;
     }
-    await db.trabajadores.add({
-      nombre: fTrab.nombre.trim(), apellido: fTrab.apellido.trim(),
-      telefono: fTrab.telefono.trim(), curp: fTrab.curp.trim().toUpperCase(),
-      areaId: Number(fTrab.areaId),
-    });
-    setFTrab({ nombre: '', apellido: '', telefono: '', curp: '', areaId: '' });
-    setOkMsg('Trabajador registrado.');
-    recargar();
+  
+    const nuevoTrabajador = {
+    nombre: fTrab.nombre.trim(), 
+    apellido: fTrab.apellido.trim(),
+    telefono: fTrab.telefono.trim(), 
+    curp: fTrab.curp.trim().toUpperCase(),
+    areaId: Number(fTrab.areaId)
   };
 
+  try {
+    // 1. Intentar guardar en la Nube
+    const res = await fetch('https://jobasisitand-backend.onrender.com/api/trabajadores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(nuevoTrabajador)
+    });
+
+    if (!res.ok) throw new Error('No se pudo guardar en la nube');
+
+    // 2. Solo si tuvo éxito, guardamos localmente
+    await db.trabajadores.add(nuevoTrabajador);
+    
+    setFTrab({ nombre: '', apellido: '', telefono: '', curp: '', areaId: '' });
+    setOkMsg('Trabajador registrado en la nube.');
+    recargar();
+  } catch (err) {
+    setErrorMsg('Error al conectar con la nube: ' + err.message);
+  }
+};
+
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+    
   const eliminarEncargado  = async id => {
     await db.supervisor_areas.where('supervisorId').equals(id).delete();
     await db.supervisores.delete(id);
