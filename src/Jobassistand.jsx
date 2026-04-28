@@ -115,19 +115,50 @@ export default function Jobassistand() {
   const limpiar    = () => { setErrorMsg(''); setOkMsg(''); };
   const cambiarModo = m => { setModo(m); setForm({ nombre: '', apellido: '', email: '', pass: '', confirm: '' }); limpiar(); setShowPass(false); };
 
-  const handleLogin = async () => {
-    limpiar();
-    const err = validarLogin(form);
-    if (err) { setErrorMsg(err); return; }
-    const user = await db.supervisores.where('email').equalsIgnoreCase(form.email.trim()).first();
-    if (user && user.password === form.pass) {
-      localStorage.setItem('session_usuario', JSON.stringify(user));
-      setUsuario(user);
-    } else {
-      setErrorMsg('Correo o contraseña incorrectos.');
-    }
-  };
 
+
+  //////////////////////////////////
+
+  
+ const handleLogin = async (email, password) => {
+  // 1. Intentar buscar en IndexedDB (Local)
+  let usuario = await db.supervisores.where('email').equals(email).first();
+
+  // 2. Si no está en local, buscar en el Backend (MongoDB)
+  if (!usuario) {
+    try {
+      const response = await fetch('https://tu-backend.onrender.com/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        usuario = data.usuario;
+
+        // ¡IMPORTANTE! Guardar en IndexedDB para que funcione offline después
+        await db.supervisores.add(usuario); 
+      }
+    } catch (err) {
+      console.error("Error conectando a la nube:", err);
+      // Aquí puedes mostrar un mensaje: "No hay internet y el usuario no está guardado localmente"
+    }
+  }
+
+  // 3. Validar finalmente
+  if (usuario && usuario.password === password) {
+    // Procede a entrar a la aplicación
+    iniciarSesion(usuario);
+  } else {
+    setError("Usuario no encontrado o contraseña incorrecta.");
+  }
+};
+
+
+  //////////////////////
+
+  
   const handleRegistro = async () => {
     limpiar();
     const err = validarRegistro(form);
