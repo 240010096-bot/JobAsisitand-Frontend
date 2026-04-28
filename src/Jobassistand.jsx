@@ -464,6 +464,9 @@ const crearAreaConEncargados = async () => {
 
     // A) Si es nuevo, lo creamos en la Nube
     if (crearNuevoEnc) {
+      console.log("DEBUG: Iniciando envío de relación");
+console.log("ID del Supervisor (supId):", supId);
+console.log("ID del Área (areaIdMongo):", areaIdMongo);
       const resEnc = await fetch('https://jobasisitand-backend.onrender.com/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
