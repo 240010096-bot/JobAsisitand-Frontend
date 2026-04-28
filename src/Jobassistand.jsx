@@ -88,6 +88,15 @@ const Avatar = ({ nombre, color = '#3b82f6', size = 36 }) => (
 // ─── App principal ────────────────────────────────────────────────────────────
 export default function Jobassistand() {
 
+
+// 1. ESTO ES LO QUE TE FALTA
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  // (Si también usas nombre/apellido para registrar, agrégalos aquí)
+  const [nombre, setNombre] = useState("");
+  const [apellido, setApellido] = useState("");
+  
+
    ////////////////////
 // --- PEGA ESTO AQUÍ, justo después de function Jobassistand() { ---
   useEffect(() => {
