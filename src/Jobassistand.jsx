@@ -407,9 +407,6 @@ function AdminPanel({ usuario, onLogout }) {
   const existe = await db.supervisores.where('email').equalsIgnoreCase(fEnc.email.trim()).first();
   if (existe) { setErrorMsg('Ya existe una cuenta con ese correo.'); return; }
 
- const agregarEncargado = async () => {
-  limpiar();
-  // ... (tus validaciones previas aquí) ...
 
   const nuevoSupervisor = {
     nombre: fEnc.nombre.trim(),
