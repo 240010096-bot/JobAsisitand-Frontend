@@ -250,7 +250,8 @@ export default function Jobassistand() {
             </div>
           </>
         )}
-        <button onClick={modo === 'login' ? handleLogin : handleRegistro} style={s.btnBlue}>
+        <button onClick={() => { if (modo === 'login') { handleLogin(email, password);
+    } else { handleRegistro()} }} style={s.btnBlue}>
           {modo === 'login' ? 'Ingresar' : 'Crear Cuenta Admin'}
         </button>
         {modo === 'register' && (
