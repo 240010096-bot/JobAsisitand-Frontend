@@ -119,8 +119,7 @@ export default function Jobassistand() {
 
   //////////////////////////////////
 
-  
-const handleLogin = async (email, password) => {
+ const handleLogin = async (email, password) => {
   // 1. Validaciones preventivas (Evita que el código intente buscar "undefined")
   if (!email || email.trim() === "" || !password || password.trim() === "") {
     setErrorMsg("Por favor, ingresa correo y contraseña.");
@@ -169,7 +168,6 @@ const handleLogin = async (email, password) => {
     setErrorMsg("Error al conectar: " + err.message);
   }
 };
-
   //////////////////////
 
   
