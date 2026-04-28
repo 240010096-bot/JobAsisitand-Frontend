@@ -433,12 +433,12 @@ function AdminPanel({ usuario, onLogout }) {
 const crearAreaConEncargados = async () => {
   limpiar();
 
-  // 1. VALIDACIONES INICIALES
+  // 1. VALIDACIONES
   if (!fArea.nombre.trim()) { setErrorMsg('El nombre del área es obligatorio.'); return; }
   
-  let encargadosIds = [];
+  let idsFinales = [];
 
-  // 2. LÓGICA DE ENCARGADOS (Nuevo o Existente)
+  // Lógica de validación para nuevo encargado
   if (crearNuevoEnc) {
     if (!nuevoEncData.nombre.trim())    { setErrorMsg('Nombre del encargado es obligatorio.'); return; }
     if (!nuevoEncData.apellido.trim())   { setErrorMsg('Apellido del encargado es obligatorio.'); return; }
@@ -446,27 +446,19 @@ const crearAreaConEncargados = async () => {
     if (!validarEmail(nuevoEncData.email)) { setErrorMsg('Correo no válido.'); return; }
     if (!nuevoEncData.pass || nuevoEncData.pass.length < 6) { setErrorMsg('Contraseña mínimo 6 caracteres.'); return; }
     if (nuevoEncData.pass !== nuevoEncData.confirm) { setErrorMsg('Las contraseñas no coinciden.'); return; }
-
-    // Validación local de duplicado
-    const existe = await db.supervisores.where('email').equalsIgnoreCase(nuevoEncData.email.trim()).first();
-    if (existe) { setErrorMsg('Ya existe un supervisor con ese correo.'); return; }
   } else {
     if (selectedEncargados.length === 0) {
       setErrorMsg('Debes seleccionar al menos un encargado existente o crear uno nuevo.');
       return;
     }
-    encargadosIds = selectedEncargados;
+    idsFinales = selectedEncargados;
   }
 
   try {
-    // 3. SINCRONIZACIÓN CON LA NUBE
-    let idsFinales = [];
-
-    // A) Si es nuevo, lo creamos en la Nube
+    // 2. SINCRONIZACIÓN CON LA NUBE
+    
+    // A) Crear Supervisor en la nube si es nuevo
     if (crearNuevoEnc) {
-      console.log("DEBUG: Iniciando envío de relación");
-console.log("ID del Supervisor (supId):", supId);
-console.log("ID del Área (areaIdMongo):", areaIdMongo);
       const resEnc = await fetch('https://jobasisitand-backend.onrender.com/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -481,23 +473,12 @@ console.log("ID del Área (areaIdMongo):", areaIdMongo);
 
       if (!resEnc.ok) throw new Error("Error al crear supervisor en la nube.");
       const dataEnc = await resEnc.json();
-      
-      // Guardamos el ID que nos dio Mongo
-      const mongoId = dataEnc.nuevoSupervisor?._id || dataEnc.usuario?._id; 
+      // Aseguramos capturar el ID de mongo
+      const mongoId = dataEnc.nuevoSupervisor?._id || dataEnc.usuario?._id;
       idsFinales = [mongoId];
-
-      // Guardamos también localmente
-      await db.supervisores.add({ 
-        _id: mongoId, 
-        nombre: nuevoEncData.nombre.trim(), 
-        email: nuevoEncData.email.trim().toLowerCase(), 
-        rol: 'encargado' 
-      });
-    } else {
-      idsFinales = encargadosIds;
     }
 
-    // B) Creamos el Área en la Nube
+    // B) Crear el Área en la nube
     const resArea = await fetch('https://jobasisitand-backend.onrender.com/api/areas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -510,39 +491,46 @@ console.log("ID del Área (areaIdMongo):", areaIdMongo);
     const dataArea = await resArea.json();
     const areaIdMongo = dataArea._id;
 
-    // C) Creamos las Relaciones en la Nube
+    // C) Crear las Relaciones (Corregido: bucle con alcance correcto)
     for (const supId of idsFinales) {
-      await fetch('https://jobasisitand-backend.onrender.com/api/relaciones', {
+      const resRel = await fetch('https://jobasisitand-backend.onrender.com/api/relaciones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ supervisorId: supId, areaId: areaIdMongo })
       });
       
-      // También guardamos la relación localmente para no perderla
+      if (!resRel.ok) {
+        throw new Error(`Error al asignar supervisor ${supId} al área.`);
+      }
+
+      // Guardar relación localmente
       await db.supervisor_areas.add({ supervisorId: supId, areaId: areaIdMongo });
     }
 
-    // 4. GUARDADO FINAL LOCAL (Dexie)
+    // 3. GUARDADO FINAL LOCAL
     await db.areas.add({ 
-        _id: areaIdMongo, // Guardamos el ID de Mongo para referencia futura
+        _id: areaIdMongo, 
         nombre: fArea.nombre.trim(), 
-        pagoPorHora: fArea.pagoPorHora 
+        pagoPorHora: Number(fArea.pagoPorHora) 
     });
 
-    // 5. RESET Y FEEDBACK
+    // 4. RESET Y FEEDBACK
     setFArea({ nombre: '', pagoPorHora: '' });
     setSelectedEncargados([]);
     setCrearNuevoEnc(false);
     setNuevoEncData({ nombre: '', apellido: '', email: '', pass: '', confirm: '', showPass: false });
-    setOkMsg('Área creada y sincronizada con la nube.');
+    setOkMsg('Área creada y sincronizada exitosamente.');
     recargar();
 
   } catch (err) {
     console.error("Error en proceso:", err);
-    setErrorMsg("Error de conexión: " + err.message);
+    setErrorMsg("Error: " + err.message);
   }
 };
 
+
+
+  
   const guardarEditArea = async () => {
     if (!editArea) return;
     await db.areas.update(editArea.id, {
